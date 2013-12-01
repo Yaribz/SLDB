@@ -1,7 +1,7 @@
 SLDB
 ====
 SLDB (Spring Lobby DataBase) is a data warehouse and real time ranking
-application for all games based on [SpringRTS](http://springrts.com/ engine. It
+application for all games based on [SpringRTS](http://springrts.com/) engine. It
 is designed to offer all the required functionalities to manage the player base
 in the context of FOSS (Free Open Source Software) games, where players can
 create as many accounts as they want and games can be hosted by anyone. For
@@ -14,6 +14,7 @@ this purpose, following functionalities have notably been implemented:
   required matches when new accounts are joined/split)
 * protection against fake data sent by thrid parties
 * configurable privacy levels to limit account information disclosure
+
 SLDB is also designed to allow fast access to historical data concerning all
 games and players using main Spring lobby since July 2012 (matches results,
 ranking data, statistics...).
@@ -43,14 +44,14 @@ The SLDB lobby inteface bot is based on the templates provided by following proj
 
 Dependencies
 ------------
+The SLDB application is based on a partitionned database which requires MySQL
+5.5 or later.
+
 The SLDB application depends on following projects:
 * [SimpleConf](https://github.com/Yaribz/SimpleConf)
 * [SimpleLog](https://github.com/Yaribz/SimpleLog)
 * [SpringLobbyInterface](https://github.com/Yaribz/SpringLobbyInterface)
 * [TrueSkill python module](https://github.com/sublee/trueskill)
-
-The SLDB application is based on a partitionned database which requires MySQL
-5.5.
 
 Additionally, some SLDB components require some standard but non-core Perl
 modules to be available on the system (easily installable through CPAN):
@@ -80,14 +81,17 @@ Installation
 * run the sldbSetup.pl script from SLDB directory and execute all steps, as
   selectionned by default by the script
 * Edit the etc/sldbLi.conf file to set following parameters:
-  lobbyPassword (password of the lobby account used by sldbLi), sldb (replace
-  <dbLogin>, <dbPwd> and <dbName> by the corresponding values for SLDB), etcDir
-  (directory containing sldbLi config files, should be the "etc" dubdirectory
-  of SLDB), varDir (directory containing sldbLi dynamic data, should be the
-  "var" subdirectory of SLDB), logDir (directory containing sldbLi log files,
-  should be the "var/log" subdirectory of SLDB)
+  * lobbyPassword (password of the lobby account used by sldbLi)
+  * sldb (replace  &lt;dbLogin&gt;, &lt;dbPwd&gt; and &lt;dbName&gt; by the
+    corresponding values for SLDB)
+  * etcDir (directory containing sldbLi config files, should be the
+    "etc" subdirectory of SLDB)
+  * varDir (directory containing sldbLi dynamic data, should be the "var"
+    subdirectory of SLDB)
+  * logDir (directory containing sldbLi log files, should be the "var/log"
+    subdirectory of SLDB)
 * Edit the etc/users.conf file and update the <> placeholders with the desired
-  privileged user names and account IDs for sldbLi
+  privileged lobby user names and account IDs for sldbLi
 * You are now ready to launch all SLDB components, using recommended order:
         ./slMonitor.pl
         ./zkMonitor.pl
