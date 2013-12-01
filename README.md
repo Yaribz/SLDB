@@ -91,8 +91,9 @@ Installation
   * logDir (directory containing sldbLi log files, should be the "var/log"
     subdirectory of SLDB)
 * Edit the etc/users.conf file and update the <> placeholders with the desired
-  privileged lobby user names and account IDs for sldbLi
+  privileged lobby user names and account IDs for SLDB
 * You are now ready to launch all SLDB components, using recommended order:
+
         ./slMonitor.pl
         ./zkMonitor.pl
         ./ratingEngine.pl
