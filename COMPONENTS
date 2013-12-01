@@ -1,0 +1,52 @@
+===============================================================================
+                               SLDB components
+===============================================================================
+
+ratingEngine (Rating Engine)
+============
+ratingEngine implements the rating engine for SLDB.
+The rating engine is in charge of computing all games results to produce
+players ranking data. It is based on TrueSkill(tm) ranking algorithm.
+
+
+sldbLi (Lobby Interface)
+======
+sldbLi implements the Spring lobby interface for SLDB.
+sldbLi is a Spring lobby bot, it serves three main purposes:
+- allow (auto)hosts to access ranking data for auto-balancing/matchmaking
+- offer basic ranking data to players and advanced ranking data to SLDB admins
+- allow SLDB admins to manage SLDB user data manually
+
+
+sldbSetup (SLDB Setup script)
+=========
+sldbSetup implements the setup process for SLDB.
+The setup process for SLDB consists in two main tasks:
+- database initialization
+- components configuration
+
+
+slMmonitor (Lobby Monitor)
+==========
+slMonitor implements the Spring lobby monitoring functionality for SLDB.
+slMonitor is a Spring lobby bot, it serves 2 main purposes:
+- monitor and store all lobby data (users, battles...) into SLDB in realtime
+- receive, check, and store game data reports (GDR) sent by SPADS into SLDB
+
+
+xmlRpc (XML-RPC interface)
+======
+xmlRpc implements the XML-RPC interface for SLDB.
+The XML-RPC interface offers various services to handle SLDB user preferences
+and access players ranking data and statistics. It is used by the Spring
+replay site to display SLDB data to players in realtime.
+
+
+zkMonitor (Zero-K monitor)
+=========
+zkMonitor implements the Zero-K website monitoring functionality for SLDB.
+zkMonitor is an HTTP bot, it monitors the Zero-K website to detect newly
+finished battles and performs following operations on each of them:
+- extract the battle details data from Zero-K battle HTML page
+- check the battle details are consistent with SLDB data (stored by slMonitor)
+- store the battle details into SLDB if data are consistent

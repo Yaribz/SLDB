@@ -1,0 +1,76 @@
+[adminEvents]
+!adminEvents [<maxAge> [<typeFilter> [<subTypeFilter> [<origFilter> [<origIdFilter>]]]]] - lists recent admin events (default <maxAge> is 7d), with optional filters [alias: !ae]
+"!adminEvents 1y JOIN_ACC * 1" shows all admin events of type "JOIN_ACC" that occured over the past year, with any subType and orig=1
+
+[checkIps]
+!checkIps <name>|#<accountId> - list known in-game IPs for the account identified uniquely by his name <name> or by his ID <accountId>
+
+[checkProbSmurfs]
+!checkProbSmurfs [<maxAge>] - list probable smurfs (default <maxAge> is 6m) [alias: !cps]
+
+[help]
+!help [<command>] - lists allowed SLDB commands (print examples for command <command> if <command> is specified)
+"!help" lists allowed commands
+"!help help" print examples for command help
+
+[helpall]
+!helpall - lists all commands
+
+[joinAcc]
+!joinAcc [-f] [-s] [-t] <userName1>|#<userId1> <userName2>|#<userId2> - joins the two users (order has no importance), "-f" = force, "-s" = sticky, "-t" = test [alias: !ja]
+"!joinAcc joe joe_" joins the users with exact user names "joe" and "joe_" if they were not explicitly marked as "not-smurf"
+"!joinAcc -f #1234 #5678" joins the users identified by their user IDs #1234 and #5678 even if they were explicitly marked as "not-smurf"
+"!joinAcc -s #1234 #5678" joins the users #1234 and #5678 if they were not explicitly marked as "not-smurf", and prevents them to be auto-split on simultaneous play
+
+[leaderboard]
+!leaderboard <modShortName> [<gameType>] [-][<nbPlayers>] - shows a top <nbPlayers> leaderboard for a given MOD and gameType, using conservative skill [alias: !lb]
+"!leaderboard BA Duel 50" shows a top 50 Balanced Annihilation duel players leaderboard
+
+[notSmurf]
+!notSmurf <accountName1>|#<accountId1> <accountName2>|#<accountId2> - removes a probable smurf entry between two accounts and replaces it by a "not-smurf" entry [alias: !ns]
+
+[quit]
+!quit - forces bot to quit
+
+[ranking]
+!ranking [<name>|#<accountId>] - prints ranking information for current user or user identified by his name <name> or by his account ID <accountId> if provided [alias: !r]
+
+[reloadConf]
+!reloadConf - reloads configuration
+
+[restart]
+!restart - restarts bot
+
+[searchUser]
+!searchUser <nameString>|@<ipAddr>|&<hardwareId> - searches users using name, IP address, or hardware ID filters [alias: !su]
+"!searchUser bib" searches all users containing "bib" in their name
+"!searchUser @1.2.3.4" searches all users who used IP address "1.2.3.4"
+"!searchUser &-1333568" searches all users who used hardware ID "-1333568"
+
+[sendLobby]
+!sendLobby <lobbyCommand> - send raw command to lobby server
+
+[set]
+!set <prefName> [<prefValue>] - configure a setting
+"!set ircColors 0" disables the use of IRC colors in bot output
+"!set ircColors" restores default value for setting "ircColors"
+
+[setName]
+!setName <oldName>|#<userId> <newName> - renames the user named <userName> or whose user ID is <userId> to <newName> [alias: !sn]
+"!setName smurf realName" renames the user "smurf" to "realName"
+"!setName #1234 joe" renames the user with user ID 1234 to "joe"
+
+[splitAcc]
+!splitAcc [-f] [-s] [-t] <userName>|#<userId> <accountName>|#<accountId> - detaches the account from the user, "-f" = force, "-s" = sticky, "-t" = test [alias: !sa]
+
+[topSkill]
+!topSkill <modShortName> [<gameType> [-][<nbPlayers>]] - shows a top <nbPlayers> leaderboard for a given MOD and gameType, using estimated skill [alias: !ts]
+"!topSkill ZK Team 50" shows a leaderboard with top 50 Zero-K team players
+
+[version]
+!version - requests versions of all bot components
+
+[whois]
+!whois [-f] <name>|#<accountId> - show information for the account identified uniquely by name <name> or ID <accountId>, "-f" = full [alias: !w]
+"!whois joe" prints account information for player "joe"
+"!whois #1234" prints account information for account ID 1234
