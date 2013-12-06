@@ -773,12 +773,29 @@ sub fixGameType {
 
 # Called by xmlRpc.pl
 sub getPlayerStats {
-  my ($self,$accountId,$modShortName)=@_;
+  my ($self,$accountId,$modShortName,$mode)=@_;
   
   my $userId=$self->getUserId($accountId);
   if(! defined $userId) {
     $self->log("getPlayerStats called for an unknown ID \"$accountId\"",2);
     return {};
+  }
+
+  if(! defined $mode) {
+    my $userPrivacyMode;
+    $self->getUserPref($accountId,'privacyMode',\$userPrivacyMode);
+    if($userPrivacyMode) {
+      $mode='account';
+    }else{
+      $mode='user';
+    }
+  }
+
+  my $sqlWherePart;
+  if($mode eq 'user') {
+    $sqlWherePart=", userAccounts ua where ua.userId=$userId and ua.accountId=pd.accountId";
+  }else{
+    $sqlWherePart=" where pd.accountId=$accountId";
   }
   my $quotedModShortName=$self->quote($modShortName);
   
@@ -788,7 +805,7 @@ sub getPlayerStats {
     $results{$gameType}={won => 0, lost => 0, draw => 0};
   }
   my @resultMapping=('lost','won','draw');
-  my $sth=$self->prepExec("select gd.type,pd.win,count(*) from games g,gamesNames gn, gamesDetails gd, playersDetails pd, userAccounts ua where ua.userId=$userId and ua.accountId=pd.accountId and pd.gameId=gd.gameId and gd.type!='Solo' and gd.bots=0 and gd.undecided=0 and gd.gameId=g.gameId and g.modName regexp gn.regex and gn.shortName=$quotedModShortName and pd.team is not null group by gd.type,pd.win","extract players stats data from games,gamesNames,gamesDetails,playersDetails,userAccounts tables");
+  my $sth=$self->prepExec("select gd.type,pd.win,count(*) from games g,gamesNames gn, gamesDetails gd, playersDetails pd$sqlWherePart and pd.gameId=gd.gameId and gd.type!='Solo' and gd.bots=0 and gd.undecided=0 and gd.gameId=g.gameId and g.modName regexp gn.regex and gn.shortName=$quotedModShortName and pd.team is not null group by gd.type,pd.win","extract players stats data from games,gamesNames,gamesDetails,playersDetails,userAccounts tables");
   my @sqlResults;
   while(@sqlResults=$sth->fetchrow_array()) {
     my ($gameType,$result,$count)=@sqlResults;
