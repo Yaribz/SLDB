@@ -873,18 +873,6 @@ sub rateModFromMonth {
   }
 }
 
-sub rateAllFromMonth {
-  my ($startYear,$startMonth)=@_;
-  slog("Start of batch rating (all games, since $startYear-$startMonth)",3);
-  $sldb->do("insert into tsRatingState values('batchRatingStatus',1) on duplicate key update value=1",'update batchRatingStatus parameter to 1 in tsRatingState table');
-  my $p_allMods=$sldb->getModsShortNames();
-  foreach my $modShortName (@{$p_allMods}) {
-    rateModFromMonth($startYear,$startMonth,$modShortName);
-  }
-  $sldb->do("update tsRatingState set value=0 where param='batchRatingStatus'",'update batchRatingStatus parameter to 0 in tsRatingState table');
-  slog("End of batch rating (all games, since $startYear-$startMonth)",3);
-}
-
 slog("Checking rating database state",3);
 my $p_ratingState=$sldb->getRatingState();
 if(! exists $p_ratingState->{currentRatingMonth}) {  
@@ -946,20 +934,34 @@ while($running && time < $running) {
     }
   }
   if($rerateTs && time >= $rerateTs+$conf{rerateDelay}) {
-    slog("Starting global rerate...",3);
+    slog("Starting global rerate process, checking mods to rerate...",3);
     $rerateTs=0;
-    $sth=$sldb->prepExec("select YEAR(min(tsg.gdrTimestamp)),MONTH(min(tsg.gdrTimestamp)) from tsGames tsg,tsRerateAccounts tsra where tsg.accountId=tsra.accountId",'retrieve rerate start date from tsGames and tsRerateAccounts tables');
-    my @rerateTimeData=$sth->fetchrow_array;
-    if(! @rerateTimeData) {
-      slog('Unable to find retate start date, cancelling global rerate!',1);
+    $sth=$sldb->prepExec("select YEAR(min(tsg.gdrTimestamp)),MONTH(min(tsg.gdrTimestamp)),tsg.modShortName from tsGames tsg,tsRerateAccounts tsra where tsg.accountId=tsra.accountId group by tsg.modShortName",'retrieve rerate start date from tsGames and tsRerateAccounts tables');
+    my %rerateYearMonthByMod;
+    my @rerateTimeData;
+    while(@rerateTimeData=$sth->fetchrow_array()) {
+      $rerateYearMonthByMod{$rerateTimeData[2]}={year => $rerateTimeData[0], month => $rerateTimeData[1]};
+    }
+    if(! %rerateYearMonthByMod) {
+      slog('Unable to find any rerate start date, cancelling global rerate!',1);
     }else{
       $sldb->do("truncate table tsRerateAccounts");
-      my ($rerateYear,$rerateMonth)=@rerateTimeData;
-      if($rerateYear > $currentRatingYear || ($rerateYear == $currentRatingYear && $rerateMonth > $currentRatingMonth)) {
-        slog("Rerate start date \"$rerateYear-$rerateMonth\" is a future date , cancelling global rerate!",1);
-      }else{
-        rateAllFromMonth($rerateYear,$rerateMonth);
+      my @modsStartDates;
+      foreach my $modShortName (keys %rerateYearMonthByMod) {
+        push(@modsStartDates,"$modShortName (since $rerateYearMonthByMod{$modShortName}->{year}-$rerateYearMonthByMod{$modShortName}->{month})");
       }
+      slog('Start of batch rating, rerate queue: '.join(', ',@modsStartDates),3);
+      $sldb->do("insert into tsRatingState values('batchRatingStatus',1) on duplicate key update value=1",'update batchRatingStatus parameter to 1 in tsRatingState table');
+      foreach my $modShortName (keys %rerateYearMonthByMod) {
+        my ($rerateYear,$rerateMonth)=($rerateYearMonthByMod{$modShortName}->{year},$rerateYearMonthByMod{$modShortName}->{month});
+        if($rerateYear > $currentRatingYear || ($rerateYear == $currentRatingYear && $rerateMonth > $currentRatingMonth)) {
+          slog("Rerate start date \"$rerateYear-$rerateMonth\" is a future date, cancelling global rerate for $modShortName!",1);
+        }else{
+          rateModFromMonth($rerateYear,$rerateMonth,$modShortName);
+        }
+      }
+      $sldb->do("update tsRatingState set value=0 where param='batchRatingStatus'",'update batchRatingStatus parameter to 0 in tsRatingState table');
+      slog('End of batch rating, processed: '.join(', ',@modsStartDates),3);
     }
   }
   $sth=$sldb->prepExec("select gameId from tsRatingQueue where status=0 order by gdrTimestamp,gameId","retrieve games queued for rating in tsRatingQueue table");
