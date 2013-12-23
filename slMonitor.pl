@@ -186,7 +186,7 @@ sub cbLobbyConnect {
                         SERVERMSG => \&cbServerMsg,
                         BROADCAST => \&cbBroadcast});
 
-  $lobby->sendCommand(['LOGIN',$conf{lobbyLogin},$lobby->marshallPasswd($conf{lobbyPassword}),0,'*','SpringLobbyMonitor v0.1',0,'a b sp'],
+  $lobby->sendCommand(['LOGIN',$conf{lobbyLogin},$lobby->marshallPasswd($conf{lobbyPassword}),0,'*','SpringLobbyMonitor v0.1',0,'a b sp cl'],
                       {ACCEPTED => \&cbLoginAccepted,
                        DENIED => \&cbLoginDenied,
                        AGREEMENTEND => \&cbAgreementEnd},
@@ -316,8 +316,8 @@ sub cbBattleOpened {
   }
   my $hostAccountId=$lobby->{users}->{$user}->{accountId};
   my $p_b=$lobby->{battles}->{$bId};
-  my ($quotedFounder,$quotedMod,$quotedMap,$quotedDescription)=$sldb->quote($user,$p_b->{mod},$p_b->{map},$p_b->{title});
-  $sldb->do("insert into rtBattles values ($bId,$hostAccountId,$quotedFounder,INET_ATON('$p_b->{ip}'),$p_b->{port},$p_b->{type},$p_b->{natType},$p_b->{locked},$p_b->{passworded},$p_b->{rank},$quotedMod,$quotedMap,$p_b->{mapHash},$quotedDescription,$p_b->{maxPlayers},$p_b->{nbSpec})","insert new battle in rtBattles on BattleOpened ($bId,$user)",\&nonFatalError);
+  my ($quotedFounder,$quotedMod,$quotedMap,$quotedDescription,$quotedEngineName,$quotedEngineVersion)=$sldb->quote($user,$p_b->{mod},$p_b->{map},$p_b->{title},$p_b->{engineName},$p_b->{engineVersion});
+  $sldb->do("insert into rtBattles values ($bId,$hostAccountId,$quotedFounder,INET_ATON('$p_b->{ip}'),$p_b->{port},$p_b->{type},$p_b->{natType},$p_b->{locked},$p_b->{passworded},$p_b->{rank},$quotedMod,$quotedMap,$p_b->{mapHash},$quotedDescription,$p_b->{maxPlayers},$p_b->{nbSpec},$quotedEngineName,$quotedEngineVersion)","insert new battle in rtBattles on BattleOpened ($bId,$user)",\&nonFatalError);
   $sldb->do("insert into rtBattlePlayers values ($hostAccountId,$bId)","insert host in rtBattlePlayers on BattleOpened ($bId,$user)",\&nonFatalError);
 }
 

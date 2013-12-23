@@ -405,6 +405,8 @@ create table if not exists rtBattles (
   description varchar(255),
   maxPlayers int,
   nbSpec tinyint unsigned,
+  engineName varchar(30),
+  engineVersion varchar(100),
   index(founderId),
   index(founder),
   index(ip),

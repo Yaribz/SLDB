@@ -51,7 +51,7 @@ Preference tables: (filled/updated by sldbLi and xmlRpc)
 
 Real time tables: (filled/updated in real time by slMonitor to mirror current lobby server state)
 ================
-  rtBattles: battleId, founderId, founder, ip, port, type, natType, locked, passworded, rankLimit, modName, mapName, mapHash, description, maxPlayers, nbSpec
+  rtBattles: battleId, founderId, founder, ip, port, type, natType, locked, passworded, rankLimit, modName, mapName, mapHash, description, maxPlayers, nbSpec, engineName, engineVersion
   rtPlayers: accountId, name, access, bot, country, cpu, rank, inGame, gameTimestamp, away, awayTimestamp
   rtBattlePlayers: accountId, battleId
 
