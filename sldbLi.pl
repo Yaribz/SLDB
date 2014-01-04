@@ -135,6 +135,7 @@ my %hostBattles;
 my %hostSkills;
 my %battleHosts;
 my %newGamesFinished;
+my %hostsVersions;
 
 my $sldbSimpleLog=SimpleLog->new(logFiles => [$conf{logDir}."/sldbLi.log",''],
                                  logLevels => [$conf{sldbLogLevel},3],
@@ -715,12 +716,14 @@ sub checkTimedEvents {
           }
         }
         if($#newGetSkillParams > 6) {
+          unshift(@newGetSkillParams,3) if(exists $hostsVersions{$host} && $hostsVersions{$host} == 3);
           my $paramsString=join(' ',@newGetSkillParams);
           handleRequest('pv',$host,"#getSkill $paramsString");
           @newGetSkillParams=();
         }
       }
       if(@newGetSkillParams) {
+        unshift(@newGetSkillParams,3) if(exists $hostsVersions{$host} && $hostsVersions{$host} == 3);
         my $paramsString=join(' ',@newGetSkillParams);
         handleRequest('pv',$host,"#getSkill $paramsString");
       }
@@ -998,7 +1001,15 @@ sub hGetSkill {
   }
   my $currentRatingPeriod=$sldb->getCurrentRatingPeriod();
 
+  my $interfaceVersion=2;
   shift(@{$p_params}) if($p_params->[0] eq '2');
+
+  if($p_params->[0] eq '3') {
+    $interfaceVersion=3;
+    shift(@{$p_params});
+  }
+
+  $hostsVersions{$user}=$interfaceVersion;
 
   my $notAHost=0;
   if(! exists $hostBattles{$user}) {
@@ -1009,10 +1020,34 @@ sub hGetSkill {
     return;
   }
 
+  my %topPlayers;
+
   my $quotedModShortName;
   if(! $notAHost) {
     my $modShortName=$sldb->getModShortName($lobby->{battles}->{$hostBattles{$user}}->{mod});
-    $quotedModShortName=$sldb->quote($modShortName) if(defined $modShortName);
+    if(defined $modShortName) {
+      $quotedModShortName=$sldb->quote($modShortName);
+      if($interfaceVersion == 3) {
+        foreach my $gameType (keys %gameTypeMapping) {
+          $topPlayers{$gameType}={};
+          my $p_topPlayers=$sldb->getTopPlayers($currentRatingPeriod,$modShortName,$gameType,20);
+          if(defined $p_topPlayers) {
+            for my $i (0..$#{$p_topPlayers}) {
+              my $topUserId=$p_topPlayers->[$i];
+              if($i == 0) {
+                $topPlayers{$gameType}->{$topUserId}=1;
+              }elsif($i < 5) {
+                $topPlayers{$gameType}->{$topUserId}=2;
+              }elsif($i < 10) {
+                $topPlayers{$gameType}->{$topUserId}=3;
+              }else{
+                $topPlayers{$gameType}->{$topUserId}=4;
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   my @returnParams;
@@ -1067,7 +1102,20 @@ sub hGetSkill {
     }
     my $userPrivacyMode;
     $sldb->getUserPref($accountId,'privacyMode',\$userPrivacyMode);
-    push(@returnParams,"$accountId|0|$userPrivacyMode|$p_skills->{Duel}->{mu},$p_skills->{Duel}->{sigma}|$p_skills->{FFA}->{mu},$p_skills->{FFA}->{sigma}|$p_skills->{Team}->{mu},$p_skills->{Team}->{sigma}|$p_skills->{TeamFFA}->{mu},$p_skills->{TeamFFA}->{sigma}");
+    if($interfaceVersion == 3) {
+      my $userId=$sldb->getUserId($accountId);
+      my %skillClasses;
+      foreach my $gameType (keys %gameTypeMapping) {
+        if(exists $topPlayers{$gameType}->{$userId}) {
+          $skillClasses{$gameType}=$topPlayers{$gameType}->{$userId};
+        }else{
+          $skillClasses{$gameType}=5;
+        }
+      }
+      push(@returnParams,"$accountId|0|$userPrivacyMode|$p_skills->{Duel}->{mu},$p_skills->{Duel}->{sigma},$skillClasses{Duel}|$p_skills->{FFA}->{mu},$p_skills->{FFA}->{sigma},$skillClasses{FFA}|$p_skills->{Team}->{mu},$p_skills->{Team}->{sigma},$skillClasses{Team}|$p_skills->{TeamFFA}->{mu},$p_skills->{TeamFFA}->{sigma},$skillClasses{TeamFFA}");
+    }else{
+      push(@returnParams,"$accountId|0|$userPrivacyMode|$p_skills->{Duel}->{mu},$p_skills->{Duel}->{sigma}|$p_skills->{FFA}->{mu},$p_skills->{FFA}->{sigma}|$p_skills->{Team}->{mu},$p_skills->{Team}->{sigma}|$p_skills->{TeamFFA}->{mu},$p_skills->{TeamFFA}->{sigma}");
+    }
 
     my $latestRatedGame=$sldb->getLatestRatedGameId($accountId,$quotedModShortName);
     $hostSkills{$user}->{$playerName}={ip => $ip,
@@ -2395,6 +2443,7 @@ sub cbLobbyConnect {
   %hostSkills=();
   %battleHosts=();
   %newGamesFinished=();
+  %hostsVersions=();
 }
 
 sub cbBroadcast {

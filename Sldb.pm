@@ -1040,6 +1040,27 @@ sub getLeaderboard {
   return \@resultData;
 }
 
+# Called by sldbLi.pl
+sub getTopPlayers {
+  my ($self,$period,$modShortName,$gameType,$size)=@_;
+
+  $gameType='Global' unless(defined $gameType);
+  if(! exists $gameTypeMapping{$gameType}) {
+    $self->log("getTopPlayers called with an invalid game type \"$gameType\"",2);
+    return;
+  }
+  $size=20 unless(defined $size);
+  if($size !~ /^\d+$/) {
+    $self->log("getTopPlayers called with an invalid size \"$size\"",2);
+    return;
+  }
+  my $quotedModShortName=$self->quote($modShortName);
+  my $gType=$gameTypeMapping{$gameType};
+  my $sth=$self->prepExec("select userId from ts${gType}Players where period=$period and modShortName=$quotedModShortName order by skill desc limit $size","extract top players data from ts${gType}Players table");
+  my $p_results=$sth->fetchall_arrayref();
+  return $p_results;
+}
+
 ##############################
 # Smurf management functions #
 ##############################
