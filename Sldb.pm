@@ -1057,8 +1057,12 @@ sub getTopPlayers {
   my $quotedModShortName=$self->quote($modShortName);
   my $gType=$gameTypeMapping{$gameType};
   my $sth=$self->prepExec("select userId from ts${gType}Players where period=$period and modShortName=$quotedModShortName order by skill desc limit $size","extract top players data from ts${gType}Players table");
-  my $p_results=$sth->fetchall_arrayref();
-  return $p_results;
+  my @topPlayers;
+  my @results;
+  while(@results=$sth->fetchrow_array()) {
+    push(@topPlayers,$results[0]);
+  }
+  return \@topPlayers;
 }
 
 ##############################
