@@ -497,8 +497,7 @@ sub cbServerMsg {
   if($msg =~ /^The ID for <([^>]+)> is (\-?\d+)/) {
     my ($user,$hardwareId)=($1,$2);
     if(exists $lobby->{users}->{$user}) {
-      my $accountId=$lobby->{users}->{$user}->{accountId};
-      $sldb->do("insert into hardwareIds values ($accountId,$hardwareId,now()) on duplicate key update lastConnection=now()","insert or update hardwareIds table for account \"$accountId\" and hardwareId \"$hardwareId\"");
+      seenHardwareId($lobby->{users}->{$user}->{accountId},$hardwareId);
     }else{
       slog("Ignoring hardwareId \"$hardwareId\" received for offline user \"$user\"",4);
     }
@@ -577,6 +576,32 @@ sub initializeUserTablesIfNeeded {
   slog("User tables initialization done.",3);
 }
 
+sub seenHardwareId {
+  my ($accountId,$hardwareId)=@_;
+  $sldb->do("insert into hardwareIds values ($accountId,$hardwareId,now()) on duplicate key update lastConnection=now()","insert or update hardwareIds table for account \"$accountId\" and hardwareId \"$hardwareId\"");
+  return unless($hardwareId);
+  return unless($lobby->{users}->{$lobby->{accounts}->{$accountId}}->{status}->{rank} == 0);
+  my $smurfId=$sldb->getUserId($accountId);
+  return unless($smurfId == $accountId);
+  my $sth=$sldb->prepExec("select distinct ua.userId from userAccounts ua,hardwareIds hw where ua.userId != $smurfId and ua.accountId=hw.accountId and hw.hardwareId=$hardwareId limit 2","retrieve users with accounts matching hardwareId \"$hardwareId\" from userAccounts and hardwareIds");
+  my $p_results=$sth->fetchall_arrayref();
+  return unless(@{$p_results});
+  if($#{$p_results} > 0) {
+    slog("HardwareId of newbie account \"$lobby->{accounts}->{$accountId}\" matches multiple users, cancelling auto-merge",4);
+    return;
+  }
+  my $userId=$p_results->[0]->[0];
+  my $mergeStatus=checkUserMerge($userId,$smurfId,1);
+  return unless($mergeStatus);
+  slog("Detected smurf for user \#$userId: \#$smurfId ($lobby->{accounts}->{$accountId}), merging users...",3);
+  $sldb->adminEvent('JOIN_ACC',$mergeStatus,0,0,{mainUserId => $userId, childUserId => $smurfId});
+  $sth=$sldb->prepExec("select accountId from userAccounts where userId=$smurfId","retrieve smurfs list of user $smurfId that will be joined with user $userId");
+  my $p_oldUserSmurfs=$sth->fetchall_arrayref();
+  foreach my $p_accountId (@{$p_oldUserSmurfs}) {
+    $sldb->queueGlobalRerate($p_accountId->[0]);
+  }
+  $sldb->do("update userAccounts set userId=$userId where userId=$smurfId","update data in table userAccounts for new smurf found \"$smurfId\" of \"$userId\"");
+}
 
 sub seenIp {
   my ($id,$ip,$date)=@_;
