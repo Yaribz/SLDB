@@ -1737,7 +1737,7 @@ sub hSearchUser {
         push(@userIds,$exactMatch);
         $alreadyFoundString=" and ua.userId != $exactMatch";
       }
-      $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name=$quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit 100","retrieve users with accounts matching exactly $quotedSearch from userAccounts and names [!searchUser]");
+      $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name=$quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit 200","retrieve users with accounts matching exactly $quotedSearch from userAccounts and names [!searchUser]");
       while(@results=$sth->fetchrow_array()) {
         push(@userIds,$results[0]);
       }
@@ -1748,12 +1748,12 @@ sub hSearchUser {
     $quotedSearch=$sldb->quote($search);
     my $alreadyFoundString='';
     $alreadyFoundString=' and ud.userId not in ('.join(',',@userIds).')' if(@userIds);
-    $sth=$sldb->prepExec("select ud.userId from userDetails ud,userAccounts ua,accounts a where ud.name like $quotedSearch$alreadyFoundString and ud.userId=ua.userId and ua.userId=a.id group by ud.userId order by a.lastUpdate desc limit 100","retrieve users whose name matches $quotedSearch from userDetails [!searchUser]");
+    $sth=$sldb->prepExec("select ud.userId from userDetails ud,userAccounts ua,accounts a where ud.name like $quotedSearch$alreadyFoundString and ud.userId=ua.userId and ua.userId=a.id group by ud.userId order by a.lastUpdate desc limit 200","retrieve users whose name matches $quotedSearch from userDetails [!searchUser]");
     while(@results=$sth->fetchrow_array()) {
       push(@userIds,$results[0]);
     }
     $alreadyFoundString=' and ua.userId not in ('.join(',',@userIds).')' if(@userIds);
-    $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name like $quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit 100","retrieve users with accounts matching $quotedSearch from userAccounts and names [!searchUser]");
+    $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name like $quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit 200","retrieve users with accounts matching $quotedSearch from userAccounts and names [!searchUser]");
     while(@results=$sth->fetchrow_array()) {
       push(@userIds,$results[0]);
     }
@@ -1772,7 +1772,7 @@ sub hSearchUser {
              and ua.accountId=a.id
              and ua.accountId=c.accountId
        group by ua.accountId
-       order by a.lastUpdate desc limit 100","query accounts data for user $userId [!searchUser]");
+       order by a.lastUpdate desc limit 200","query accounts data for user $userId [!searchUser]");
     my $firstResult=1;
     while(@results=$sth->fetchrow_array()) {
       my $accountId=$results[1];
@@ -1825,9 +1825,9 @@ sub hSearchUser {
         $accountData{"$C{5}UserName"}="$C{2}$results[0]";
       }
       push(@searchResults,\%accountData);
-      last if($#searchResults == 100);
+      last if($#searchResults == 200);
     }
-    last if($#searchResults == 100);
+    last if($#searchResults == 200);
   }
   
   if(@searchResults) {
@@ -1836,7 +1836,7 @@ sub hSearchUser {
     foreach my $resultLine (@{$p_resultLines}) {
       sayPrivate($user,$resultLine);
     }
-    sayPrivate($user,"$C{4}Result truncated to first 100 entries.") if($#searchResults == 100);
+    sayPrivate($user,"$C{4}Result truncated to first 200 entries.") if($#searchResults == 200);
   }else{
     answer("No result!");
   }
