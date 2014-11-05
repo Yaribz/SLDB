@@ -24,7 +24,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.1 (2013/12/07)
+# Version 0.2 (2014/11/05)
 
 use strict;
 
@@ -38,6 +38,9 @@ use Time::Piece;
 
 # absolute directory where backup archives will be stored locally
 my $backupDir='/home/sldb/var';
+
+# path of mysqlhotcopy utility
+my $mysqlhotcopyBin='/usr/bin/mysqlhotcopy';
 
 # LFTP bookmark to use when sending backup archives through FTP
 my $lftpBookmark='sldbbackup';
@@ -59,7 +62,7 @@ my $tmpDir="$backupDir/backup_".(localtime->strftime('%Y%m%d_%H%M%S'));
 mkpath($tmpDir);
 
 print "Performing backup.\n" if($verbose);
-system("/usr/bin/mysqlhotcopy -q --noindices sldb $tmpDir");
+system("$mysqlhotcopyBin -q --noindices sldb $tmpDir");
 
 print "Archiving backup.\n" if($verbose);
 system("tar c -C $tmpDir -f $tmpDir.tar sldb");
