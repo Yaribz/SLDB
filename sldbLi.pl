@@ -122,6 +122,7 @@ my %timestamps=(connectAttempt => 0,
                 ping => 0,
                 ratingStateCheck => 0);
 my $lobbyState=0; # (0:not_connected, 1:connecting, 2: connected, 3:logged_in, 4:start_data_received)
+my %pendingRedirect;
 my $p_answerFunction;
 my $lobbyBrokenConnection=0;
 my %lastSentMessages;
@@ -2458,20 +2459,20 @@ sub cbServerMsg {
 }
 
 sub cbRedirect {
-  my (undef,$ip)=@_;
+  my (undef,$ip,$port)=@_;
+  $ip='' unless(defined $ip);
   if($conf{lobbyFollowRedirect}) {
-    slog("Following redirection to address $ip",3);
-    $lobbyState=0;
-    foreach my $joinedChan (keys %{$lobby->{channels}}) {
-      logMsg("channel_$joinedChan","=== $conf{lobbyLogin} left ===") if($conf{logChanJoinLeave});
+    if($ip =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/ && $1<256 && $2<256 && $3<256 && $4<256) {
+      $port=$conf{lobbyPort} unless(defined $port);
+      if($port !~ /^\d+$/) {
+        slog("Invalid port \"$port\" received in REDIRECT command, ignoring redirection",1);
+        return;
+      }
+    }else{
+      slog("Invalid IP address \"$ip\" received in REDIRECT command, ignoring redirection",1);
+      return;
     }
-    $lobby->disconnect();   
-    $conf{lobbyHost}=$ip;
-    $lobby = SpringLobbyInterface->new(serverHost => $conf{lobbyHost},
-                                       serverPort => $conf{lobbyPort},
-                                       simpleLog => $lobbySimpleLog,
-                                       warnForUnhandledMessages => 0);
-    $timestamps{connectAttempt}=0;
+    %pendingRedirect=(ip => $ip, port => $port);
   }else{
     slog("Ignoring redirection request to address $ip",2);
   }
@@ -2700,6 +2701,24 @@ while($running) {
                           || ( time - $timestamps{ping} > 28 && time - $lobby->{lastRcvTs} > 28) ) ) {
     sendLobbyCommand([['PING']],5);
     $timestamps{ping}=time;
+  }
+
+  if(%pendingRedirect) {
+    my ($ip,$port)=($pendingRedirect{ip},$pendingRedirect{port});
+    %pendingRedirect=();
+    slog("Following redirection to $ip:$port",3);
+    $lobbyState=0;
+    foreach my $joinedChan (keys %{$lobby->{channels}}) {
+      logMsg("channel_$joinedChan","=== $conf{lobbyLogin} left ===") if($conf{logChanJoinLeave});
+    }
+    $lobby->disconnect();
+    $conf{lobbyHost}=$ip;
+    $conf{lobbyPort}=$port;
+    $lobby = SpringLobbyInterface->new(serverHost => $conf{lobbyHost},
+                                       serverPort => $conf{lobbyPort},
+                                       simpleLog => $lobbySimpleLog,
+                                       warnForUnhandledMessages => 0);
+    $timestamps{connectAttempt}=0;
   }
 
   if($quitScheduled) {
