@@ -9,6 +9,16 @@ The rating engine is in charge of computing all games results to produce
 players ranking data. It is based on TrueSkill(tm) ranking algorithm.
 
 
+sldbBackup (SLDB Backup script)
+==========
+sldbBackup implements the backup process for SLDB database.
+It can be executed automatically through crontab for example, but it requires an
+account with sufficient privileges to run mysqlhotcopy.
+The backup process process consists in:
+- performing a hot backup of the SLDB database
+- archiving and compressing the backup locally
+- sending a copy of the backup through FTP
+
 sldbLi (Lobby Interface)
 ======
 sldbLi implements the Spring lobby interface for SLDB.

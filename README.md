@@ -23,6 +23,7 @@ Components
 ----------
 * [ratingEngine.pl](ratingEngine.pl): Rating engine
 * [Sldb.pm](Sldb.pm): Data model layer module
+* [sldbBackup.pl](sldbBackup.pl): Backup script
 * [sldbLi.pl](sldbLi.pl): Lobby interface bot
 * [SldbLiConf.pm](SldbLiConf.pm): Configuration management module for the lobby
   interface bot
@@ -52,6 +53,12 @@ The SLDB application depends on following projects:
 * [SimpleLog](https://github.com/Yaribz/SimpleLog)
 * [SpringLobbyInterface](https://github.com/Yaribz/SpringLobbyInterface)
 * [TrueSkill python module](https://github.com/sublee/trueskill)
+
+The SLDB backup script requires following dependencies, which are only needed if
+you plan to use this script for your backups:
+* GNU [tar](http://www.gnu.org/software/tar/) and
+  [gzip](http://www.gnu.org/software/gzip/)
+* [LFTP](http://lftp.yar.ru/)
 
 Additionally, some SLDB components require some standard but non-core Perl
 modules to be available on the system (easily installable through CPAN):
@@ -99,6 +106,23 @@ Installation
         ./ratingEngine.pl
         ./sldbLi.pl
         ./xmlRpc.pl
+
+Backups
+-------
+SLDB includes a basic backup script: [sldbBackup.pl](sldbBackup.pl)
+
+The "Configuration" section of this script must be edited before first use, to
+match host environment (in particular, a LFTP bookmark must be created first to
+store the remote FTP server connection information).
+
+This script requires an account with sufficient privileges to run mysqlhotcopy.
+It can be launched manually once with verbose option to check that all works as
+expected:
+
+        ./sldbBackup.pl --verbose
+
+Then it is recommended to schedule this script to be executed weekly in off peak
+periods, using crontab for example.
 
 Documentation
 -------------
