@@ -462,7 +462,10 @@ sub getUserAliases {
   $tree->parse_file("$cacheDir/user/$id.html");
   my $bAliases=$tree->look_down(_tag => 'b',
                                 sub { $_[0]->as_trimmed_text eq 'Aliases:' });
-  error("Unable to find aliases \"b\" tag in user detail page of user \#$id") unless($bAliases);
+  if(! $bAliases) {
+    slog("Unable to find aliases \"b\" tag in user detail page of user \#$id",2);
+    return [];
+  }
   my $aliasesTextNode=$bAliases->right();
   error("Unable to find aliases text node in user detail page of user \#$id") unless(defined $aliasesTextNode);
   my @aliases=split(/,/,$aliasesTextNode);
