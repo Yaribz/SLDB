@@ -32,6 +32,7 @@ use File::Spec::Functions qw/catdir catfile file_name_is_absolute rel2abs/;
 use File::Path;
 use HTML::TreeBuilder;
 use Storable qw/dclone/;
+use Time::Piece;
 use WWW::Mechanize;
 
 my ($scriptBaseName,$scriptDir)=fileparse(rel2abs($0),'.pl');
@@ -61,6 +62,7 @@ my %conf=(baseUrl => 'http://zero-k.info',
           dbPwd => undef,
           httpRetryDelay => 60,
           minGameLength => 180,
+          timeshift => 0,
           tsTolerance => 60,
           refreshDelay => 300,
           maxRunTime => 86400
@@ -119,7 +121,18 @@ my %invalidBattles=(115733 => 1,
                     166792 => 1,
                     213035 => 1,
                     222008 => 1,
-                    230357 => 1);
+                    230357 => 1,
+                    245821 => 1,
+                    245825 => 1,
+                    245917 => 1,
+                    245930 => 1,
+                    246088 => 1,
+                    246091 => 1,
+                    246093 => 1,
+                    293614 => 1,
+                    295599 => 1,
+                    295639 => 1,
+                    296626 => 1);
 my %manualStartTsBattles=(92081 => '2012-07-20 00:50:31',
                           114235 => '2012-10-14 21:13:33');
 
@@ -307,7 +320,9 @@ sub getBattleDetail {
       error("Unable to find replay link in battle detail page of battle \#$bId");
     }
     if($replayLink->attr('href')=~ /^$conf{baseUrl}\/replays\/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2}+)_.*\.sdf$/) {
-      $bDetails{startDate}="$1-$2-$3 $4:$5:$6";
+      my $replayStartTime=Time::Piece->strptime("$1-$2-$3 $4:$5:$6",'%Y-%m-%d %T');
+      $replayStartTime+=$conf{timeshift};
+      $bDetails{startDate}=$replayStartTime->strftime('%F %T');
     }else{
       error("Unable to parse replay link \"".($replayLink->attr('href'))."\" in battle detail page of battle \#$bId");
     }
