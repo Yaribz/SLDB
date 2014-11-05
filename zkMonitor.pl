@@ -232,6 +232,7 @@ sub getBattleDetail {
       }else{
         my $status=$mech->status();
         if($running) {
+#        if($running && $status ne '500') {
           slog("Unable to query page \"$conf{baseUrl}$conf{linkBattleDetail}$bId\" for battle detail (HTTP status: $status), retrying in $conf{httpRetryDelay} seconds",2);
         }else{
           slog("Unable to query page \"$conf{baseUrl}$conf{linkBattleDetail}$bId\" for battle detail (HTTP status: $status)",2);
@@ -639,6 +640,7 @@ my @gameIdFound;
 while(@gameIdFound=$sth->fetchrow_array()) {
   if($gameIdFound[0] =~ /^zk-(\d+)$/) {
     $latestProcessedGameId=$1 unless(defined $latestProcessedGameId && $latestProcessedGameId > $1);
+    $latestProcessedGameId=293417 if(defined $latestProcessedGameId && $latestProcessedGameId < 293417);
   }
 }
 $nextBattleId=$latestProcessedGameId+1 if(defined $latestProcessedGameId);
@@ -668,13 +670,15 @@ while($running && time < $running) {
       next;
     }
     my $p_bDetails=getBattleDetail($nextBattleId++);
+#    next unless(%{$p_bDetails});
     error("Unable to get battle detail of ".($nextBattleId-1)) unless(%{$p_bDetails});
     if(exists $p_bDetails->{skip}) {
       slog('Skipping battle '.($nextBattleId-1).' (no replay link found)',2);
       next;
     }
     my $recRes=gdrReconciliation($p_bDetails);
-    error("Error during GDR reconciliation, status:$recRes") if($recRes == 2 || $recRes == 3);
+    error("Error during GDR reconciliation, status:$recRes") if($recRes == 2);
+#    error("Error during GDR reconciliation, status:$recRes") if($recRes == 2 || $recRes == 3);
     if(! (++$nbOfBattlesProcessed % 100) && $nextBattleId <= $latestBattleId) {
       my $nbRemainingBattles=$latestBattleId-$nextBattleId+1;
       my $timeRemaining=secToTime(int($nbRemainingBattles*(time-$startProcessingTs)/$nbOfBattlesProcessed));
