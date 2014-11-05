@@ -730,7 +730,7 @@ sub applyMonthPenalties {
       while($mu > $conf{inactivityPenalty}->{minMu}
           && $sigma < $conf{inactivityPenalty}->{maxSigma}
           && $nbPenaltiesToApply < ($conf{inactivityPenalty}->{threshold} - $nbGames)
-          && $nbPenalties + $nbPenalties < $conf{inactivityPenalty}->{maxPenalties}) {
+          && $nbPenalties + $nbPenaltiesToApply < $conf{inactivityPenalty}->{maxPenalties}) {
         $nbPenaltiesToApply++;
         $mu-=$conf{inactivityPenalty}->{muPenalty};
         $sigma+=$conf{inactivityPenalty}->{sigmaPenalty};
