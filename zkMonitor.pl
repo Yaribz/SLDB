@@ -608,7 +608,7 @@ sub gdrReconciliation {
   my $undecided=0;
   $undecided=1 if($p_gdr->{result} eq 'undecided');
   my ($quotedEngine,$quotedType,$quotedStructure)=$sldb->quote($p_gdr->{engine},$p_gdr->{type},$p_gdr->{structure});
-  $sldb->do("insert into gamesDetails values ($quotedGameId,FROM_UNIXTIME($gdrTime),$quotedStartDate,FROM_UNIXTIME(UNIX_TIMESTAMP($quotedStartDate)+$p_gdr->{duration}),$p_gdr->{duration},$quotedEngine,$quotedType,$quotedStructure,$hasBot,$undecided)","insert data in table gamesDetails");
+  $sldb->do("insert into gamesDetails values ($quotedGameId,FROM_UNIXTIME($gdrTime),$quotedStartDate,FROM_UNIXTIME(UNIX_TIMESTAMP($quotedStartDate)+$p_gdr->{duration}),$p_gdr->{duration},$quotedEngine,$quotedType,$quotedStructure,$hasBot,$undecided,0)","insert data in table gamesDetails");
   my $teamIndex=0;
   foreach my $playerId (keys %{$p_gdr->{players}}) {
     my $allyTeam=$p_gdr->{players}->{$playerId}->{team};

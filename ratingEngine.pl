@@ -235,17 +235,22 @@ sub rateNewGame {
     return;
   }
 
-  $sth=$sldb->prepExec("select gd.gdrTimestamp,gd.type,gn.shortName,gd.undecided from games g,gamesDetails gd, gamesNames gn where g.gameId=$quotedGameId and gd.gameId=$quotedGameId and g.modName regexp gn.regex","retrieve information for rating of game \"$gameId\"");
+  $sth=$sldb->prepExec("select gd.gdrTimestamp,gd.type,gn.shortName,gd.undecided,gd.cheating from games g,gamesDetails gd, gamesNames gn where g.gameId=$quotedGameId and gd.gameId=$quotedGameId and g.modName regexp gn.regex","retrieve information for rating of game \"$gameId\"");
   my @gameData=$sth->fetchrow_array();
   if(! @gameData) {
     slog("Ignoring rating request of game \"$gameId\" (unknown game)",2);
     $sldb->do("update tsRatingQueue set status=3 where gameId=$quotedGameId","update tsRatingQueue table for rating error of game \"$gameId\"");
     return;
   }
-  my ($gdrTimestamp,$gameType,$modShortName,$undecided)=@gameData;
+  my ($gdrTimestamp,$gameType,$modShortName,$undecided,$cheating)=@gameData;
   if($undecided) {
     slog("Ignoring rating request of game \"$gameId\" (undecided game)",2);
     $sldb->do("update tsRatingQueue set status=6 where gameId=$quotedGameId","update tsRatingQueue table for rating error of game \"$gameId\"");
+    return;
+  }
+  if($cheating) {
+    slog("Ignoring rating request of game \"$gameId\" (cheating game)",2);
+    $sldb->do("update tsRatingQueue set status=7 where gameId=$quotedGameId","update tsRatingQueue table for rating error of game \"$gameId\"");
     return;
   }
 
@@ -817,7 +822,7 @@ sub rateMonth {
     }
     $sldb->do("delete from ts${gameType}Games where modShortName=$quotedModShortName and gdrTimestamp >= '$rateYear-$rateMonth-01' and gdrTimestamp < '$nextYear-$nextMonth-01'","flush ts${gameType}Games table for $modShortName($rateYear-$rateMonth)");
   }
-  my $sth=$sldb->prepExec("select g.gameId,gd.gdrTimestamp,type from games g,gamesDetails gd,gamesNames gn where g.gameId=gd.gameId and gd.gdrTimestamp >= '$rateYear-$rateMonth-01' and gd.gdrTimestamp < '$nextYear-$nextMonth-01' and type != 'Solo' and bots = 0 and undecided = 0 and gn.shortName=$quotedModShortName and g.modName regexp gn.regex order by gd.gdrTimestamp,gd.gameId","extract games for month rating of $modShortName($rateYear-$rateMonth)");
+  my $sth=$sldb->prepExec("select g.gameId,gd.gdrTimestamp,type from games g,gamesDetails gd,gamesNames gn where g.gameId=gd.gameId and gd.gdrTimestamp >= '$rateYear-$rateMonth-01' and gd.gdrTimestamp < '$nextYear-$nextMonth-01' and type != 'Solo' and bots = 0 and undecided = 0 and cheating = 0 and gn.shortName=$quotedModShortName and g.modName regexp gn.regex order by gd.gdrTimestamp,gd.gameId","extract games for month rating of $modShortName($rateYear-$rateMonth)");
 
   $preRatingTime=time-$preRatingTime;
   
@@ -881,7 +886,7 @@ if(! exists $p_ratingState->{currentRatingMonth}) {
   my $p_allMods=$sldb->getModsShortNames();
   foreach my $modShortName (@{$p_allMods}) {
     my $quotedModShortName=$sldb->quote($modShortName);
-    my $sth=$sldb->prepExec("select YEAR(gd.gdrTimestamp),MONTH(gd.gdrTimestamp) from games g,gamesDetails gd,gamesNames gn where g.gameId=gd.gameId and gd.type != 'Solo' and gd.bots = 0 and gd.undecided = 0 and gn.shortName=$quotedModShortName and g.modName regexp gn.regex order by gd.gdrTimestamp limit 1","select first ratable $modShortName game from games and gamesDetails");
+    my $sth=$sldb->prepExec("select YEAR(gd.gdrTimestamp),MONTH(gd.gdrTimestamp) from games g,gamesDetails gd,gamesNames gn where g.gameId=gd.gameId and gd.type != 'Solo' and gd.bots = 0 and gd.undecided = 0 and gd.cheating = 0 and gn.shortName=$quotedModShortName and g.modName regexp gn.regex order by gd.gdrTimestamp limit 1","select first ratable $modShortName game from games and gamesDetails");
     my @dataFound=$sth->fetchrow_array();
     rateModFromMonth($dataFound[0],$dataFound[1],$modShortName) if(@dataFound);
   }

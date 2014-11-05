@@ -284,6 +284,7 @@ create table if not exists gamesDetails (
   structure varchar(64),
   bots tinyint unsigned,
   undecided tinyint unsigned,
+  cheating tinyint unsigned,
   index (gdrTimestamp),
   index (startTimestamp),
   index (endTimestamp)
@@ -807,7 +808,7 @@ sub getPlayerStats {
     $results{$gameType}={won => 0, lost => 0, draw => 0};
   }
   my @resultMapping=('lost','won','draw');
-  my $sth=$self->prepExec("select gd.type,pd.win,count(*) from games g,gamesNames gn, gamesDetails gd, playersDetails pd$sqlWherePart and pd.gameId=gd.gameId and gd.type!='Solo' and gd.bots=0 and gd.undecided=0 and gd.gameId=g.gameId and g.modName regexp gn.regex and gn.shortName=$quotedModShortName and pd.team is not null group by gd.type,pd.win","extract players stats data from games,gamesNames,gamesDetails,playersDetails,userAccounts tables");
+  my $sth=$self->prepExec("select gd.type,pd.win,count(*) from games g,gamesNames gn, gamesDetails gd, playersDetails pd$sqlWherePart and pd.gameId=gd.gameId and gd.type!='Solo' and gd.bots=0 and gd.undecided=0 and gd.cheating=0 and gd.gameId=g.gameId and g.modName regexp gn.regex and gn.shortName=$quotedModShortName and pd.team is not null group by gd.type,pd.win","extract players stats data from games,gamesNames,gamesDetails,playersDetails,userAccounts tables");
   my @sqlResults;
   while(@sqlResults=$sth->fetchrow_array()) {
     my ($gameType,$result,$count)=@sqlResults;

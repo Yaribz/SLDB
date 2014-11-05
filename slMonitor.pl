@@ -1205,6 +1205,18 @@ sub isValidGDR {
       $p_gdr->{result}='gameOver';
     }
   }
+  if(exists $p_gdr->{cheating}) {
+    if(! defined $p_gdr->{cheating}) {
+      slog("Field \"cheating\" existing but not defined in GDR!",2);
+      return 0;
+    }
+    if($p_gdr->{cheating} ne '0' && $p_gdr->{cheating} ne '1') {
+      slog("Invalid \"cheating\" value in GDR ($p_gdr->{cheating})!",2);
+      return 0;
+    }
+  }else{
+    $p_gdr->{cheating}=0;
+  }
   return 1;
 }
 
@@ -1282,7 +1294,7 @@ sub handleCommand {
               $undecided=1 if($p_gdr->{result} eq 'undecided');
               $sldb->do("update games set gameId=$quotedGameId where hostAccountId=$userAccountId and startTimestamp=\"$foundTs\"","update gameId in table games");
               my ($quotedEngine,$quotedType,$quotedStructure)=$sldb->quote($p_gdr->{engine},$p_gdr->{type},$p_gdr->{structure});
-              $sldb->do("insert into gamesDetails values ($quotedGameId,FROM_UNIXTIME($GDRs{$user}->{timestamp}),FROM_UNIXTIME($p_gdr->{startTs}+$GDRs{$user}->{timeshift}),FROM_UNIXTIME($p_gdr->{endTs}+$GDRs{$user}->{timeshift}),$p_gdr->{duration},$quotedEngine,$quotedType,$quotedStructure,$hasBot,$undecided)","insert data in table gamesDetails");
+              $sldb->do("insert into gamesDetails values ($quotedGameId,FROM_UNIXTIME($GDRs{$user}->{timestamp}),FROM_UNIXTIME($p_gdr->{startTs}+$GDRs{$user}->{timeshift}),FROM_UNIXTIME($p_gdr->{endTs}+$GDRs{$user}->{timeshift}),$p_gdr->{duration},$quotedEngine,$quotedType,$quotedStructure,$hasBot,$undecided,$p_gdr->{cheating})","insert data in table gamesDetails");
               my @nonSmurfAccounts;
               my %seenIps;
               foreach my $p_player (@{$p_gdr->{players}}) {
@@ -1313,7 +1325,7 @@ sub handleCommand {
                 my ($quotedName,$quotedAi)=$sldb->quote($p_bot->{name},$p_bot->{ai});
                 $sldb->do("insert into botsDetails values ($quotedGameId,$quotedName,$p_bot->{accountId},$quotedAi,$p_bot->{team},$p_bot->{allyTeam},$p_bot->{win})","insert data in table botsDetails");
               }
-              $sldb->do("insert into tsRatingQueue values ($quotedGameId,FROM_UNIXTIME($GDRs{$user}->{timestamp}),0)","add game $p_gdr->{gameId} in rating queue table") if(! $hasBot && ! $undecided && $p_gdr->{type} ne 'Solo');
+              $sldb->do("insert into tsRatingQueue values ($quotedGameId,FROM_UNIXTIME($GDRs{$user}->{timestamp}),0)","add game $p_gdr->{gameId} in rating queue table") if(! $hasBot && ! $undecided && ! $p_gdr->{cheating} && $p_gdr->{type} ne 'Solo');
             }
           }
         }

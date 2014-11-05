@@ -16,7 +16,7 @@ Main lobby tables: (filled by slMonitor by monitoring Spring lobby)
 
 Games details tables: (filled by slMonitor from GDR data sent by SPADS, and by zkMonitor from Zero-K website)
 ====================
-  gamesDetails: gameId, gdrTimestamp, startTimestamp, endTimestamp, duration, engine, type, structure, bots, undecided
+  gamesDetails: gameId, gdrTimestamp, startTimestamp, endTimestamp, duration, engine, type, structure, bots, undecided, cheating
   playersDetails: gameId, accountId, name, ip, team, allyTeam, win
   botsDetails: gameId, name, ownerAccountId, ai, team, allyTeam, win
 
@@ -41,7 +41,7 @@ Rating tables: (filled/updated by ratingEngine, but tsRatingQueue and tsRerateAc
   tsRatingState: param, value
     (param values: "currentRatingYear", "currentRatingMonth", "batchRatingStatus")
   tsRatingQueue: gameId, gdrTimestamp, status
-    (status values: 0: queued, 1: in progress, 2: duplicate, 3: error/unratable, 4: error/gdrTimestampFormat, 5: error/inconsistentGdrTimestamp, 6: undecided game)
+    (status values: 0: queued, 1: in progress, 2: duplicate, 3: error/unratable, 4: error/gdrTimestampFormat, 5: error/inconsistentGdrTimestamp, 6: undecided game, 7: cheating game)
   tsRerateAccounts: accountId, accountTimestamp
 
 Preference tables: (filled/updated by sldbLi and xmlRpc)
