@@ -46,7 +46,7 @@ if($#ARGV > 0 || ! -f $confFile) {
   exit 1;
 }
 
-my %conf=(logLevel => 5,
+my %conf=(logLevel => 4,
           sldbLogLevel => 4,
           logFile => catfile('var','log',"$scriptBaseName.log"),
           usersFile => catfile('etc',"$scriptBaseName.users.conf"),
