@@ -58,6 +58,8 @@ my %gameTypeMapping=('Duel' => 'Duel',
 my %ACCOUNTS_PREF=( ircColors => ['[01]',1] );
 my %USERS_PREF=( privacyMode => ['[012]',1] );
 
+my $chartClickerUnavailable;
+
 sub new {
   my ($objectOrClass,$p_params)=@_;
   my $class = ref($objectOrClass) || $objectOrClass;
@@ -817,6 +819,141 @@ sub getPlayerStats {
   }
 
   return \%results;
+}
+
+# Called by xmlRpc.pl
+sub getPlayerSkillGraphs {
+  my ($self,$accountId,$modShortName)=@_;
+  
+  my $sth=$self->prepExec("select ua.userId,ud.name from userAccounts ua,userDetails ud where ua.accountId=$accountId and ua.userId=ud.userId");
+  my @results=$sth->fetchrow_array();
+  if(! @results) {
+    $self->log("getPlayerSkillGraphs called for an unknown ID \"$accountId\"",2);
+    return undef;
+  }
+  my ($userId,$userName)=@results;
+  return $self->generateSkillGraphs($userId,$userName,$modShortName);
+}
+
+# Called by sldbLi.pl, getPlayerSkillGraphs()
+sub generateSkillGraphs {
+  my ($self,$userId,$userName,$modShortName,$tmpDir)=@_;
+
+  if(! defined $chartClickerUnavailable) {
+    eval <<'END_OF_EVAL_LIST';
+    use Chart::Clicker;
+    use Chart::Clicker::Context;
+    use Chart::Clicker::Data::DataSet;
+    use Chart::Clicker::Data::Series;
+    use Chart::Clicker::Drawing::ColorAllocator;
+    use Chart::Clicker::Renderer::Line;
+    use Chart::Clicker::Renderer::StackedArea;
+    use Graphics::Color::RGB;
+    use Graphics::Primitive::Font;
+END_OF_EVAL_LIST
+    $chartClickerUnavailable=$@;
+    $self->log("Chart::Clicker module could not be loaded, skill graph functionality disabled: $chartClickerUnavailable",1) if($chartClickerUnavailable);
+  }
+
+  return undef if($chartClickerUnavailable);
+
+  my $quotedModShortName=$self->quote($modShortName);
+  my $sth;
+  my @skillGraphsFiles;
+  my %skillGraphsData;
+  foreach my $gameType (keys %gameTypeMapping) {
+    my $gType=$gameTypeMapping{$gameType};
+    $sth=$self->prepExec("select muBefore,sigmaBefore from ts${gType}Games where userId=$userId and modShortName=$quotedModShortName order by gdrTimestamp limit 1","retrieve initial skill data for mod $modShortName, user $userId and game type $gameType from table ts${gType}Games");
+    my @result=$sth->fetchrow_array();
+    next unless(@result);
+    my ($initMu,$initSigma)=@result;
+  
+    $sth=$self->prepExec("select period,skill,mu,sigma from ts${gType}Players where modShortName=$quotedModShortName and userId=$userId order by period","retrieve historical skill data for mod $modShortName, user $userId and game type $gameType from ts${gType}Players table");
+    my @periods;
+    my %estimatedSkills;
+    my %trustedSkills;
+    my %skillRegions;
+    my $index=0;
+    $estimatedSkills{0}=$initMu;
+    $trustedSkills{0}=$initMu-3*$initSigma;
+    $skillRegions{0}=6*$initSigma;
+    while(@result=$sth->fetchrow_array()) {
+      $index++;
+      if($result[0]=~/^(\d{4})(\d\d)$/) {
+        push(@periods,"$1-$2");
+      }else{
+        $self->log("Invalid period string \"$result[0]\" encountered in generateSkillGraphs for mod $modShortName, user $userId and game type $gameType",1);
+        return undef;
+      }
+      $estimatedSkills{$index}=$result[2];
+      $trustedSkills{$index}=$result[2]-3*$result[3];
+      $skillRegions{$index}=6*$result[3];
+    }
+    next if($index < 2);
+
+    my $ca = Chart::Clicker::Drawing::ColorAllocator->new( {
+      colors => [ Graphics::Color::RGB->new(red => 0.9, green => 0.9, blue => 0.9, alpha => 0),
+                  Graphics::Color::RGB->new(red => 0.2, green => 0.2, blue => 1.0, alpha => 0.5),
+                  Graphics::Color::RGB->new(red => 0, green => 0, blue => 1, alpha => 0.5) ] } );
+
+    my $cc = Chart::Clicker->new(width => 1024, height => 512, format => 'png', color_allocator => $ca);
+
+    my $defctx = $cc->get_context('default');
+    $defctx->range_axis->range->min(0);
+    $defctx->range_axis->range->max(50);
+    $defctx->range_axis->ticks(10);
+    $defctx->range_axis->format(sub { return int(shift); });
+    $defctx->range_axis->label('TrueSkill');
+    $defctx->range_axis->label_color(Graphics::Color::RGB->new(red => 0, green => 0, blue => 1, alpha => 1));
+    $defctx->range_axis->label_font->weight('bold');
+    $defctx->domain_axis->tick_values([1..$index-1]);
+    $defctx->domain_axis->tick_labels(\@periods);
+    $defctx->domain_axis->tick_label_angle(0.785);
+    $defctx->domain_axis->label('Time');
+    $defctx->domain_axis->label_font->weight('bold');
+
+    my $stackedCtx=Chart::Clicker::Context->new( name => 'stacked' );
+    my $stackedRenderer=Chart::Clicker::Renderer::StackedArea->new(opacity => 0.5);
+    $stackedRenderer->brush->width(0);
+    $stackedCtx->renderer($stackedRenderer);
+    $stackedCtx->share_axes_with($defctx);
+    $cc->add_to_contexts($stackedCtx);
+
+    my $stackedSeries1=Chart::Clicker::Data::Series->new(\%trustedSkills);
+    my $stackedSeries2=Chart::Clicker::Data::Series->new(\%skillRegions);
+    my $stackedDs=Chart::Clicker::Data::DataSet->new(series => [$stackedSeries1,$stackedSeries2]);
+    $stackedDs->context('stacked');
+    $cc->add_to_datasets($stackedDs);
+
+    my $lineRenderer = Chart::Clicker::Renderer::Line->new();
+    $lineRenderer->brush->width(3);
+    $defctx->renderer($lineRenderer);
+
+    my $lineSeries = Chart::Clicker::Data::Series->new(\%estimatedSkills);
+    my $lineDs=Chart::Clicker::Data::DataSet->new(series => [$lineSeries]);
+    $cc->add_to_datasets($lineDs);
+
+    $cc->title->text("$modShortName $gameType TrueSkill graph for $userName (\#$userId)");
+    $cc->title->font->weight('bold');
+    $cc->title->font->size(20);
+    $cc->title->padding->top(5);
+    $cc->title->padding->bottom(5);
+    $cc->legend->visible(0);
+    if(defined $tmpDir) {
+      my $graphName="SkillGraph_${modShortName}_${gameType}_$userId.png";
+      $cc->write_output("$tmpDir/$graphName");
+      push(@skillGraphsFiles,$graphName);
+    }else{
+      $cc->draw;
+      $skillGraphsData{$gameType}=$cc->rendered_data;
+    }
+  }
+
+  if(defined $tmpDir) {
+    return \@skillGraphsFiles;
+  }else{
+    return \%skillGraphsData;
+  }
 }
 
 ################################

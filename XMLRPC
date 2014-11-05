@@ -128,10 +128,33 @@ The leaderboard size is 20, as when saying !leaderboard to SLDB. But the returne
 parameters: login (string), password (string), modShortName (string), accountId (int)
 
 
-It returns a map with following keys: status (int), results (hash of arrays).
+It returns a map with following keys: status (int), results (map of arrays).
 
 "status" values:
 0: OK, 1: authentication failed, 2: invalid params
 (the "results" key is only present if status=0)
 
-"results" is a hash indexed by gameType ("Duel", "FFA", "Team", "TeamFFA"), giving the following stats array for each one of these game types: nbOfGamesLost (int), nbOfGamesWon (int), nbOfGamesUndecided (int)
+"results" is a map indexed by gameType ("Duel", "FFA", "Team", "TeamFFA"), giving the following stats array for each one of these game types: nbOfGamesLost (int), nbOfGamesWon (int), nbOfGamesUndecided (int)
+
+
+
+================================================================================
+                                getPlayerSkillGraphs
+================================================================================
+
+parameters: login (string), password (string), modShortName (string), accountId (int)
+
+
+It returns a map with following keys: status (int), results (map of maps).
+
+"status" values:
+0: OK, 1: authentication failed, 2: invalid params
+(the "results" key is only present if status=0)
+
+"results" is a map indexed by game type ("Duel", "FFA", "Team", "TeamFFA", "Global") of maps having following keys: status (int), graph (base64)
+
+"status" values:
+0: OK, 1: unrated account for this game type
+(the "graph" key is only present if status=0)
+
+"graph" contains a base64 encoded png image

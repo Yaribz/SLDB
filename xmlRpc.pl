@@ -62,6 +62,12 @@ my %conf=(logLevel => 4,
     );
 SimpleConf::readConf($confFile,\%conf);
 
+my %gameTypeMapping=('Duel' => 'Duel',
+                     'FFA' => 'Ffa',
+                     'Team' => 'Team',
+                     'TeamFFA' => 'TeamFfa',
+                     'Global' => '');
+
 my $usersFile=$conf{usersFile};
 $usersFile=catfile($scriptDir,$usersFile) unless(file_name_is_absolute($usersFile));
 my %users;
@@ -170,6 +176,9 @@ $s->add_method( {name => 'getLeaderboards',
 $s->add_method( {name => 'getPlayerStats',
                  signature => ['struct string string string int'],
                  code => \&getPlayerStats} );
+$s->add_method( {name => 'getPlayerSkillGraphs',
+                 signature => ['struct string string string int'],
+                 code => \&getPlayerSkillGraphs} );
 
 my $perfTimer;
 
@@ -472,6 +481,50 @@ sub getPlayerStats {
   my %results;
   foreach my $gameType (keys %{$p_stats}) {
     $results{$gameType}=[$p_stats->{$gameType}->{lost},$p_stats->{$gameType}->{won},$p_stats->{$gameType}->{draw}];
+  }
+  perfEnd();
+  return { status => 0, results => \%results }
+}
+
+sub getPlayerSkillGraphs {
+  perfBegin();
+  my ($p_server,$login,$password,$modShortName,$accountId)=@_;
+  slog("getPlayerSkillGraphs called with login=\"$login\", password=\"$password\", modShortName=\"$modShortName\", accoundId=\"$accountId\" [$p_server->{peerhost}]",5);
+
+  if(! exists $users{$login} || $password ne $users{$login}) {
+    slog("getPlayerSkillGraphs called with invalid login/password \"$login/$password\" (modShortName=\"$modShortName\", accoundId=\"$accountId\") [$p_server->{peerhost}]",3);
+    perfEnd();
+    return { status => 1 }
+  }
+
+  my $fixedModShorName=$sldb->fixModShortName($modShortName);
+  if(! defined $fixedModShorName) {
+    slog("getPlayerSkillGraphs called with invalid modShortName \"$modShortName\" (login=\"$login\", accoundId=\"$accountId\") [$p_server->{peerhost}]",2);
+    perfEnd();
+    return { status => 2 }
+  }
+  $modShortName=$fixedModShorName;
+
+  if($accountId !~ /^\d+$/) {
+    slog("getPlayerSkillGraphs called with invalid accountId \"$accountId\" (login=\"$login\", modShortName=\"$modShortName\") [$p_server->{peerhost}]",2);
+    perfEnd();
+    return { status => 2 }
+  }
+
+  my $p_graphs=$sldb->getPlayerSkillGraphs($accountId,$modShortName);
+  if(! (defined $p_graphs && %{$p_graphs})) {
+    slog("getPlayerSkillGraphs called with an unknown accountId \"$accountId\" (login=\"$login\", modShortName=\"$modShortName\") [$p_server->{peerhost}]",2);
+    perfEnd();
+    return { status => 2 }
+  }
+
+  my %results;
+  foreach my $gameType (keys %gameTypeMapping) {
+    if(exists $p_graphs->{$gameType}) {
+      $results{$gameType} = { status => 0, graph => RPC::XML::base64->new($p_graphs->{$gameType}) };
+    }else{
+      $results{$gameType} = { status => 1 };
+    }
   }
   perfEnd();
   return { status => 0, results => \%results }
