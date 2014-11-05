@@ -924,8 +924,28 @@ sub getSkills {
   }
 
   if(! defined $userSkill) {
-    $self->log("getSkills called for non-rated user ID \"$userId\"",2);
-    return {};
+    $self->log("getSkills called for non-rated user ID \"$userId\"",3);
+    my %rankInitSkills=(0 => 20,
+                        1 => 22,
+                        2 => 23,
+                        3 => 24,
+                        4 => 25,
+                        5 => 26,
+                        6 => 28,
+                        7 => 30);
+    $sth=$self->prepExec("select rank from accounts where id=$userId");
+    @foundData=$sth->fetchrow_array();
+    if(@foundData) {
+      my $skillInit=$rankInitSkills{$foundData[0]};
+      my %skills;
+      foreach my $gameType (keys %gameTypeMapping) {
+        $skills{$gameType}={mu => $skillInit, sigma => 25/3};
+      }
+      return \%skills;
+    }else{
+      $self->log("Unable to find rank of unrated player (id:$id, userId:$userId)",1);
+      return {};
+    }
   }
 
   my %skills;
