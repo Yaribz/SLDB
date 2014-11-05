@@ -31,6 +31,7 @@ use File::Basename qw/dirname fileparse/;
 use File::Spec::Functions qw/catdir catfile file_name_is_absolute rel2abs/;
 use File::Path;
 use IO::Select;
+use MIME::Base64;
 use Storable qw(thaw);
 
 my ($scriptBaseName,$scriptDir)=fileparse(rel2abs($0),'.pl');
@@ -1219,11 +1220,15 @@ sub handleCommand {
                   data => ''};
   }elsif($command eq '#endGDR') {
     if(exists $GDRs{$user}) {
-      $GDRs{$user}->{data}=~s/<NL>/\n/g; #OBSOLETE FOR SPADS >= 0.11.11
-      $GDRs{$user}->{data}=~s/<CM>//g; #OBSOLETE FOR SPADS >= 0.11.11
-      $GDRs{$user}->{data}=~s/<LF>/\cJ/g;
-      $GDRs{$user}->{data}=~s/<CR>/\cM/g;
-      $GDRs{$user}->{data}=~s/<EX>/\!/g;
+      if($GDRs{$user}->{data}=~/</) { # Backward compatibility with SPADS < 0.11.22
+        $GDRs{$user}->{data}=~s/<NL>/\n/g; # Backward compatibility with SPADS < 0.11.11
+        $GDRs{$user}->{data}=~s/<CM>//g; # Backward compatibility with SPADS < 0.11.11
+        $GDRs{$user}->{data}=~s/<LF>/\cJ/g;
+        $GDRs{$user}->{data}=~s/<CR>/\cM/g;
+        $GDRs{$user}->{data}=~s/<EX>/\!/g;
+      }else{
+        $GDRs{$user}->{data}=decode_base64($GDRs{$user}->{data});
+      }
       my $p_gdr=eval { thaw($GDRs{$user}->{data}) };
       if($@) {
         slog("Unable to read GDR received from \"$user\"!",2);
