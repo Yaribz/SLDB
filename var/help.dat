@@ -60,6 +60,10 @@
 "!setName smurf realName" renames the user "smurf" to "realName"
 "!setName #1234 joe" renames the user with user ID 1234 to "joe"
 
+[skillGraph]
+!skillGraph <modShortName> [<name>|#<accountId>] - generates online TrueSkill graphs for current user or user identified by <name> or <accountId> if provided [alias: !sg]
+"!skillGraph BA" generates online BA TrueSkill graphs for current user
+
 [splitAcc]
 !splitAcc [-f] [-s] [-t] <userName>|#<userId> <accountName>|#<accountId> - detaches the account from the user, "-f" = force, "-s" = sticky, "-t" = test [alias: !sa]
 

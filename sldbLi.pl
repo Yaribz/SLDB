@@ -39,6 +39,7 @@ use SpringLobbyInterface;
 
 my $sldbLiVer='0.1';
 
+$SIG{CHLD} = \&sigChldHandler;
 $SIG{TERM} = \&sigTermHandler;
 $SIG{USR1} = \&sigUsr1Handler;
 $SIG{USR2} = \&sigUsr2Handler;
@@ -82,10 +83,13 @@ my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       sendlobby => \&hSendLobby,
                       set => \&hSet,
                       setname => \&hSetName,
+                      skillgraph => \&hSkillGraph,
                       splitacc => \&hSplitAcc,
                       topskill => \&hTopSkill,
                       version => \&hVersion,
                       whois => \&hWhois );
+
+my %skillGraphReportPids;
 
 # Basic checks ################################################################
 
@@ -155,8 +159,9 @@ my $lobby = SpringLobbyInterface->new(serverHost => $conf{lobbyHost},
                                       simpleLog => $lobbySimpleLog,
                                       warnForUnhandledMessages => 0);
 my $sldb;
+my ($sldbLogin,$sldbPasswd,$sldbDs);
 if($conf{sldb} =~ /^([^\/]+)\/([^\@]+)\@((?i:dbi)\:\w+\:\w.*)$/) {
-  my ($sldbLogin,$sldbPasswd,$sldbDs)=($1,$2,$3);
+  ($sldbLogin,$sldbPasswd,$sldbDs)=($1,$2,$3);
   $sldb=Sldb->new({dbDs => $sldbDs,
                    dbLogin => $sldbLogin,
                    dbPwd => $sldbPasswd,
@@ -172,6 +177,34 @@ if(! $sldb->connect()) {
 }
 
 # Subfunctions ################################################################
+
+sub sigChldHandler {
+  my $childPid;
+  while($childPid = waitpid(-1,WNOHANG)) {
+    last if($childPid == -1);
+    my $exitCode=$? >> 8;
+    my $signalNb=$? & 127;
+    my $hasCoreDump=$? & 128;
+    handleSigChld($childPid,$exitCode,$signalNb,$hasCoreDump);
+  }
+  $SIG{CHLD} = \&sigChldHandler;
+}
+
+sub handleSigChld {
+  my ($childPid,$exitCode,$signalNb,$hasCoreDump)=@_;
+  if(exists $skillGraphReportPids{$childPid}) {
+    if($lobbyState >= 4 && exists $lobby->{users}->{$skillGraphReportPids{$childPid}->{orig}}) {
+      if($exitCode) {
+        sayPrivate($skillGraphReportPids{$childPid}->{orig},"Unable to generate online $skillGraphReportPids{$childPid}->{mod} TrueSkill graphs for $skillGraphReportPids{$childPid}->{userName}");
+      }else{
+        sayPrivate($skillGraphReportPids{$childPid}->{orig},"Online $skillGraphReportPids{$childPid}->{mod} TrueSkill graphs for $skillGraphReportPids{$childPid}->{userName} available at $skillGraphReportPids{$childPid}->{url}");
+      }
+    }
+    delete $skillGraphReportPids{$childPid};
+  }else{
+    slog("Received a CHLD signal for unknown process! (PID:$childPid, exitCode:$exitCode)",2);
+  }
+}
 
 sub sigTermHandler {
   scheduleQuit('SIGTERM signal received');
@@ -615,6 +648,7 @@ sub handleRequest {
                 ns => 'notSmurf',
                 r => 'ranking',
                 sa => 'splitAcc',
+                sg => 'skillGraph',
                 sn => 'setName',
                 su => 'searchUser',
                 ts => 'topSkill',
@@ -1946,6 +1980,164 @@ sub hSetName {
     answer("Unable to log action in admin event table, rename cancelled!");
     return 0;
   }
+}
+
+sub hSkillGraph {
+  my ($source,$user,$p_params)=@_;
+
+  if($#{$p_params} < 0 || $#{$p_params} > 1) {
+    invalidSyntax($user,'skillgraph');
+    return 0;
+  }
+
+  my ($modShortName,$accountString)=@{$p_params};
+
+  my $fixedModShorName=$sldb->fixModShortName($modShortName);
+  if(! defined $fixedModShorName) {
+    my $p_allowedMods=$sldb->getModsShortNames();
+    my $allowedModsString=join(',',@{$p_allowedMods});
+    invalidSyntax($user,'skillgraph',"allowed games: $allowedModsString");
+    return 0;
+  }
+  $modShortName=$fixedModShorName;
+
+  if(defined $accountString) {
+    my $level=getUserAccessLevel($user);
+    if($level < 120) {
+      answer("You are not authorized to query other players' skill graphs !");
+      return 0;
+    }
+  }else{
+    $accountString='#'.$lobby->{users}->{$user}->{accountId};
+  }
+
+  my $sth;
+  my @results;
+
+  my $accountId;
+  if($accountString =~ /^\#(\d+)$/) {
+    $accountId=$1;
+  }else{
+    $accountId=$sldb->identifyUniqueAccountByStringUserFirst($accountString);
+    if(! defined $accountId) {
+      answer("No account found for search string \"$accountString\" !");
+    }elsif($accountId == -1) {
+      answer("Multiple account names match your search string \"$accountString\", use more specific search string or use !searchUser command instead");
+    }elsif($accountId == -2) {
+      answer("Multiple user names contain your search string \"$accountString\", use more specific search string or use !searchUser command instead");
+    }elsif($accountId == -3) {
+      answer("Multiple account names contain your search string \"$accountString\", use more specific search string or use !searchUser command instead");
+    }
+    return 0 unless(defined $accountId && $accountId > 0);
+  }
+
+  $sth=$sldb->prepExec("select ua.userId,ud.name from userAccounts ua,userDetails ud where ua.accountId=$accountId and ua.userId=ud.userId");
+  @results=$sth->fetchrow_array();
+  if(! @results) {
+    answer("Unknown account ID $accountId !");
+    return 0;
+  }
+  my ($userId,$userName)=@results;
+
+  my $genRes=generateOnlineReport($userId,$userName,$modShortName,$user);
+  if($genRes) {
+    answer("Unable to process request ($genRes)");
+  }else{
+    answer("Generating online $modShortName TrueSkill graphs for $userName...");
+  }
+}
+
+sub generateOnlineReport {
+  use Time::Piece;
+
+  my ($userId,$userName,$modShortName,$orig)=@_;
+  my $tmpSubDir="TrueSkillGraphs_${userId}_${modShortName}_".(localtime->strftime('%Y%m%d_%H%M%S'));
+  
+  my $childPid = fork();
+  if(! defined $childPid) {
+    slog("Unable to fork to generate online $modShortName TrueSkill report for user \#$userId",1);
+    return 'technical error';
+  }elsif($childPid == 0) {
+    $SIG{CHLD}='';
+    $sldb=Sldb->new({dbDs => $sldbDs,
+                 dbLogin => $sldbLogin,
+                 dbPwd => $sldbPasswd,
+                 sLog => $sldbSimpleLog,
+                 sqlErrorHandler => \&sqlErrorHandler });
+    if(! $sldb->connect()) {
+      slog("Unable to connect to SLDB",1);
+      exit 1;
+    }
+    my $uploadRes=uploadSkillReport($userId,$userName,$modShortName,$tmpSubDir);
+    exit $uploadRes;
+  }else{
+    $skillGraphReportPids{$childPid}={url => "http://planetspads.free.fr/sldb/$tmpSubDir/index.html", orig => $orig, userName => $userName, userId => $userId, mod => $modShortName};
+    return 0;
+  }
+}
+
+sub uploadSkillReport {
+  use File::Path;
+  use File::Temp;
+
+  my ($userId,$userName,$modShortName,$tmpSubDir)=@_;
+
+  my $tmpDir=File::Temp->newdir();
+  my $absTmpSubDir="$tmpDir/$tmpSubDir";
+  mkpath($absTmpSubDir);
+  
+  my $p_genRes=generateSkillGraphPage($userId,$userName,$modShortName,$absTmpSubDir);
+  if(! defined $p_genRes) {
+    slog("Error occured while generating skill graphs page",2);
+    return 2;
+  }
+
+  system("lftp planetspads -e \"mirror -R $absTmpSubDir /sldb/$tmpSubDir;quit\" >/dev/null 2>&1");
+  return 0;
+}
+
+sub generateSkillGraphPage {
+  use FileHandle;
+
+  my ($userId,$userName,$modShortName,$tmpDir)=@_;
+  my $p_skillgraphRes=$sldb->generateSkillGraphs($userId,$userName,$modShortName,$tmpDir);
+  if(! defined $p_skillgraphRes) {
+    slog("Error occured while generating skill graphs",1);
+    return undef;
+  }
+  if(! @{$p_skillgraphRes}) {
+    slog("Unable to generate any $modShortName skill graph for user \#$userId",2);
+    return undef;
+  }
+
+  my $indexHandle = new FileHandle;
+  my $indexFileName='index.html';
+  if(! $indexHandle->open("> $tmpDir/$indexFileName")) {
+    slog("Unable to open file $indexFileName for writing!",1);
+    return undef;
+  }
+
+  print $indexHandle <<INDEX_HEADER_END;
+<!DOCTYPE html>
+<html>
+	<head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+        <title>SLDB - $modShortName TrueSkill graphs for $userName (\#$userId)</title>
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width">
+  </head>
+  <body style="background-image: -moz-linear-gradient(bottom, #0A2033 0%, #1C4B6B 100%); background-repeat:no-repeat; background-attachment:fixed;">
+  	<img style="display: block; margin-left: auto; margin-right: auto;" src="http://planetspads.free.fr/sldb/logo.png"></img>
+INDEX_HEADER_END
+
+  foreach my $graphFile (@{$p_skillgraphRes}) {
+    print $indexHandle "<br/><img style=\"display: block; margin-left: auto; margin-right: auto;\" src=\"$graphFile\"></img>\n";
+  }
+  print $indexHandle '</body></html>';
+  $indexHandle->close();
+  push(@{$p_skillgraphRes},$indexFileName);
+  return $p_skillgraphRes;
 }
 
 sub hSplitAcc {
