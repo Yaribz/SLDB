@@ -632,8 +632,18 @@ sub rateGameBatch {
       slog("Skipping rating of TeamFFA game $gameId, no winner team identified and tie TeamFFA games can't be rated",4);
       return 0;
     }
-    my @losingTeamNumbers=sort {$a <=> $b} (keys %losingTeams);
 
+    my ($minTeamSize,$maxTeamSize);
+    foreach my $teamNb (keys %teamsUsers) {
+      $minTeamSize=$#{$teamsUsers{$teamNb}}+1 unless(defined $minTeamSize && $#{$teamsUsers{$teamNb}}+1 >= $minTeamSize);
+      $maxTeamSize=$#{$teamsUsers{$teamNb}}+1 unless(defined $maxTeamSize && $#{$teamsUsers{$teamNb}}+1 <= $maxTeamSize);
+    }
+    if($maxTeamSize - $minTeamSize > 1) {
+      slog("Skipping rating of TeamFFA game $gameId, teams are too uneven (minTeamSize=$minTeamSize, maxTeamSize=$maxTeamSize)",4);
+      return 0;
+    }
+
+    my @losingTeamNumbers=sort {$a <=> $b} (keys %losingTeams);
     foreach my $ratingType ('global','teamFfa') {
       my @orderedLoosingTeamsRatings;
       foreach my $teamNumber (@losingTeamNumbers) {
