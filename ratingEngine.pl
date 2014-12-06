@@ -771,20 +771,49 @@ sub applyMonthPenalties {
         and tsg.gdrTimestamp >= '$rateYear-$rateMonth-01'
         and tsg.gdrTimestamp < '$nextYear-$nextMonth-01'
   group by userId
-  having nbGames > $conf{inactivityPenalty}->{threshold}","retrieve players back from inactivity for $modShortName during month $rateYear-$rateMonth");
+  having nbGames > $conf{inactivityPenalty}->{threshold}","retrieve players back from global inactivity for $modShortName during month $rateYear-$rateMonth");
   ($nbPenalizedUsers,$totalPenalties)=(0,0);
   while(@inactiveData=$sth->fetchrow_array()) {
     my ($userId,$nbPenalties,$nbGames)=@inactiveData;
     my $nbPenaltiesToDrop=$nbGames - $conf{inactivityPenalty}->{threshold};
     $nbPenaltiesToDrop=$nbPenalties if($nbPenaltiesToDrop > $nbPenalties);
-    foreach my $gameType (keys %gameRatingMapping) {
-      $sldb->do("update ts${gameType}Players set nbPenalties = 0 where period=$ratePeriod and userId=$userId and modShortName=$quotedModShortName and nbPenalties > 0 and nbPenalties < $nbPenaltiesToDrop","purge penalties for user $userId, mod $modShortName and gameType $gameType");
-      $sldb->do("update ts${gameType}Players set nbPenalties = nbPenalties-$nbPenaltiesToDrop where period=$ratePeriod and userId=$userId and modShortName=$quotedModShortName and nbPenalties >= $nbPenaltiesToDrop","drop $nbPenaltiesToDrop penalties for user $userId, mod $modShortName anbd gameType $gameType");
-    }
+    $sldb->do("update tsPlayers set nbPenalties = 0 where period=$ratePeriod and userId=$userId and modShortName=$quotedModShortName and nbPenalties > 0 and nbPenalties < $nbPenaltiesToDrop","purge penalties for user $userId, mod $modShortName and global gameType");
+    $sldb->do("update tsPlayers set nbPenalties = nbPenalties-$nbPenaltiesToDrop where period=$ratePeriod and userId=$userId and modShortName=$quotedModShortName and nbPenalties >= $nbPenaltiesToDrop","drop $nbPenaltiesToDrop penalties for user $userId, mod $modShortName and global gameType");
     $nbPenalizedUsers++;
     $totalPenalties+=$nbPenaltiesToDrop;
   }
-  slog("$nbPenalizedUsers players recovered from inactivity period ($totalPenalties penalties dropped)",4) if($totalPenalties > 0);
+  slog("$nbPenalizedUsers players recovered from global inactivity period ($totalPenalties penalties dropped)",4) if($totalPenalties > 0);
+
+  foreach my $gameType (keys %gameRatingMapping) {
+    next if($gameType eq '');
+    $sth=$sldb->prepExec("select tsp.userId,tsp.nbPenalties,count(*) nbGames,pGlobalGames.nbGlobalGames from (ts${gameType}Players tsp,ts${gameType}Games tsg)
+  join (select userId,count(*) nbGlobalGames from tsGames
+               where modShortName=$quotedModShortName
+                     and gdrTimestamp >= '$rateYear-$rateMonth-01'
+                     and gdrTimestamp < '$nextYear-$nextMonth-01'
+                     group by userId) pGlobalGames on tsp.userId=pGlobalGames.userId
+  where tsp.period=$ratePeriod
+        and tsp.userId=tsg.userId
+        and tsp.modShortName=$quotedModShortName
+        and tsp.nbPenalties > 0
+        and tsg.modShortName=$quotedModShortName
+        and tsg.gdrTimestamp >= '$rateYear-$rateMonth-01'
+        and tsg.gdrTimestamp < '$nextYear-$nextMonth-01'
+        and pGlobalGames.nbGlobalGames > $conf{inactivityPenalty}->{threshold}
+  group by userId","retrieve players back from $gameType inactivity for $modShortName game type during month $rateYear-$rateMonth");
+    ($nbPenalizedUsers,$totalPenalties)=(0,0);
+    while(@inactiveData=$sth->fetchrow_array()) {
+      my ($userId,$nbPenalties,$nbGames,$nbGlobalGames)=@inactiveData;
+      my $nbPenaltiesToDrop=$nbGlobalGames - $conf{inactivityPenalty}->{threshold};
+      $nbPenaltiesToDrop=$nbGames if($nbGames < $nbPenaltiesToDrop);
+      $nbPenaltiesToDrop=$nbPenalties if($nbPenaltiesToDrop > $nbPenalties);
+      $sldb->do("update ts${gameType}Players set nbPenalties = 0 where period=$ratePeriod and userId=$userId and modShortName=$quotedModShortName and nbPenalties > 0 and nbPenalties < $nbPenaltiesToDrop","purge penalties for user $userId, mod $modShortName and gameType $gameType");
+      $sldb->do("update ts${gameType}Players set nbPenalties = nbPenalties-$nbPenaltiesToDrop where period=$ratePeriod and userId=$userId and modShortName=$quotedModShortName and nbPenalties >= $nbPenaltiesToDrop","drop $nbPenaltiesToDrop penalties for user $userId, mod $modShortName anbd gameType $gameType");
+      $nbPenalizedUsers++;
+      $totalPenalties+=$nbPenaltiesToDrop;
+    }
+    slog("$nbPenalizedUsers players recovered from $gameType inactivity period ($totalPenalties penalties dropped)",4) if($totalPenalties > 0);
+  }
 
   $recoveryTime=time-$recoveryTime;
 
