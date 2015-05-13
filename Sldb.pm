@@ -546,10 +546,24 @@ create table if not exists prefUsers (
 # Called by sldbLi.pl, getIdType(), getUserPref(), setUserPref(), getSkills(), getPlayerStats()
 sub getUserId {
   my ($self,$id)=@_;
-  my $sth=$self->prepExec("select userId from userAccounts where accountId=$id","retrieve userId for accountId \"$id\" userAccounts table");
+  my $sth=$self->prepExec("select userId from userAccounts where accountId=$id","retrieve userId for accountId \"$id\" from userAccounts table");
   my @results=$sth->fetchrow_array();
   return $results[0] if(@results);
   return undef;
+}
+
+# Called by getUserSmurfs()
+sub getUserIds {
+  my ($self,$p_ids)=@_;
+  return [] unless(@{$p_ids});
+  my $idsString=join(',',@{$p_ids});
+  my $sth=$self->prepExec("select distinct(userId) from userAccounts where accountId in ($idsString)","retrieve userIds for accountIds \"$idsString\" from userAccounts table");
+  my @userIds;
+  my @result;
+  while(@result=$sth->fetchrow_array()) {
+    push(@userIds,$result[0]);
+  }
+  return \@userIds;
 }
 
 # Called by sldbLi.pl, identifyUniqueAccountByString(), identifyUniqueAccountByStringUserFirst()
@@ -1031,7 +1045,7 @@ sub getSkills {
   my @foundData=$sth->fetchrow_array();
   $userSkill=$foundData[0] if(@foundData);
 
-  if(! defined $userSkill || $foundData[1] > 25/6) {
+  if(! defined $userSkill || $foundData[1] > 25/9) {
     my $p_smurfs=$self->getUserSmurfs($userId,2);
     my @smurfs=@{$p_smurfs};
 
@@ -1260,7 +1274,8 @@ sub getUserSmurfs {
     $smurfsHash{$results[0]}=1;
   }
   my @smurfs=keys %smurfsHash;
-  return \@smurfs;
+  my $p_userSmurfs=$self->getUserIds(\@smurfs);
+  return $p_userSmurfs;
 }
 
 # Called by sldbLi.pl
