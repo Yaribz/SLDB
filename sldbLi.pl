@@ -1060,6 +1060,7 @@ sub hGetSkill {
   my $quotedModShortName;
   if(! $notAHost) {
     my $modShortName=$sldb->getModShortName($lobby->{battles}->{$hostBattles{$user}}->{mod});
+    $modShortName='XTA' if(! defined $modShortName && $lobby->{battles}->{$hostBattles{$user}}->{mod} =~ /^XTA /);
     if(defined $modShortName) {
       $quotedModShortName=$sldb->quote($modShortName);
       if($interfaceVersion == 3) {
@@ -1149,7 +1150,7 @@ sub hGetSkill {
       }
       push(@returnParams,"$accountId|0|$userPrivacyMode|$p_skills->{Duel}->{mu},$p_skills->{Duel}->{sigma},$skillClasses{Duel}|$p_skills->{FFA}->{mu},$p_skills->{FFA}->{sigma},$skillClasses{FFA}|$p_skills->{Team}->{mu},$p_skills->{Team}->{sigma},$skillClasses{Team}|$p_skills->{TeamFFA}->{mu},$p_skills->{TeamFFA}->{sigma},$skillClasses{TeamFFA}");
     }else{
-      push(@returnParams,"$accountId|0|$userPrivacyMode|$p_skills->{Duel}->{mu},$p_skills->{Duel}->{sigma}|$p_skills->{FFA}->{mu},$p_skills->{FFA}->{sigma}|$p_skills->{Team}->{mu},$p_skills->{Team}->{sigma}|$p_skills->{TeamFFA}->{mu},$p_skills->{TeamFFA}->{sigma}");
+      push(@returnParams,'outdated_sldb_interface');
     }
 
     my $latestRatedGame=$sldb->getLatestRatedGameId($accountId,$quotedModShortName);
@@ -1562,9 +1563,10 @@ sub hRanking {
     return 0;
   }
 
+  my $level=getUserAccessLevel($user);
+
   my $accountString;
   if(@{$p_params}) {
-    my $level=getUserAccessLevel($user);
     if($level < 120) {
       answer("You are not authorized to query other players' ratings !");
       return 0;
@@ -1692,7 +1694,7 @@ sub hRanking {
                           Uncertainty => $coloredUncertainty });
     }
     next unless(@rankingData);
-    my $p_resultLines=formatArray(["$C{5}GameType",'Rank','Inactivity','TrustedSkill','EstimatedSkill','Uncertainty'],\@rankingData,"$C{2}$mod$C{1} ranking for $C{12}$userName$C{1} ($C{14}$userId$C{1})");
+    my $p_resultLines=formatArray(["$C{5}GameType",'Rank','Inactivity','TrustedSkill','EstimatedSkill','Uncertainty'],\@rankingData,"$C{2}$mod$C{1} ranking".($level < 120 ? '' : " for $C{12}$userName$C{1} ($C{14}$userId$C{1})"));
     sayPrivate($user,'.');
     foreach my $resultLine (@{$p_resultLines}) {
       sayPrivate($user,$resultLine);
@@ -1748,6 +1750,23 @@ sub hSearchUser {
       $accountIds{$results[1]}=1;
     }
     $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(ipr.lastSeen) from userAccounts ua,ipRanges ipr where ua.accountId=ipr.accountId and ipr.ip1 <= INET_ATON($quotedSearch) and ipr.ip2 >= INET_ATON($quotedSearch)","retrieve dynamic IP users matching IP address $search from ipRanges table");
+    while(@results=$sth->fetchrow_array()) {
+      $userIdsTs{$results[0]}=$results[2] unless(exists $userIdsTs{$results[0]} && $userIdsTs{$results[0]} >= $results[2]);
+      $accountIds{$results[1]}=1;
+    }
+    @userIds=sort {$userIdsTs{$b} <=> $userIdsTs{$b}} (keys %userIdsTs);
+  }elsif($#{$p_params}==0 && $p_params->[0] =~ /^\@(\d{1,3}(?:\.\d{1,3}){3})-(\d{1,3}(?:\.\d{1,3}){3})$/) {
+    my ($ip1,$ip2)=($1,$2);
+    my ($quotedIp1,$quotedIp2)=$sldb->quote($ip1,$ip2);
+    $search="$ip1-$ip2";
+
+    $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(ips.lastSeen) from userAccounts ua,ips where ua.accountId=ips.accountId and ips.ip>=INET_ATON($quotedIp1) and ips.ip<=INET_ATON($quotedIp2)","retrieve users matching IP address range $search frim ips table");
+    my %userIdsTs;
+    while(@results=$sth->fetchrow_array()) {
+      $userIdsTs{$results[0]}=$results[2] unless(exists $userIdsTs{$results[0]} && $userIdsTs{$results[0]} >= $results[2]);
+      $accountIds{$results[1]}=1;
+    }
+    $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(ipr.lastSeen) from userAccounts ua,ipRanges ipr where ua.accountId=ipr.accountId and ((ipr.ip1 <= INET_ATON($quotedIp1) and ipr.ip2 >= INET_ATON($quotedIp1)) or (ipr.ip1 >= INET_ATON($quotedIp1) and ipr.ip2 <= INET_ATON($quotedIp2)) or (ipr.ip1 <= INET_ATON($quotedIp2) and ipr.ip2 >= INET_ATON($quotedIp2)))","retrieve dynamic IP users matching IP address range $search from ipRanges table");
     while(@results=$sth->fetchrow_array()) {
       $userIdsTs{$results[0]}=$results[2] unless(exists $userIdsTs{$results[0]} && $userIdsTs{$results[0]} >= $results[2]);
       $accountIds{$results[1]}=1;
@@ -2406,6 +2425,10 @@ sub hWhois {
     push(@hardwareIds,$results[0]);
   }
 
+  for my $i (0..$#hardwareIds) {
+    $hardwareIds[$i]='??' if($hardwareIds[$i] eq '2147483647');
+    $hardwareIds[$i]='???' if($hardwareIds[$i] eq '1236934115');
+  }
   my ($name,$country,$cpu,$hardwareId)=(shift @names,shift @countries,shift @cpus,shift @hardwareIds);
   $hardwareId='?' unless(defined $hardwareId);
 
