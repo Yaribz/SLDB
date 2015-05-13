@@ -68,6 +68,7 @@ my @noIrcStyle=(\%noColor,'');
 
 my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       checkips => \&hCheckIps,
+                      checkuserips => \&hCheckUserIps,
                       checkprobsmurfs => \&hCheckProbSmurfs,
                       '#getskill' => \&hGetSkill,
                       help => \&hHelp,
@@ -86,6 +87,7 @@ my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       skillgraph => \&hSkillGraph,
                       splitacc => \&hSplitAcc,
                       topskill => \&hTopSkill,
+                      uwhois => \&hUWhois,
                       version => \&hVersion,
                       whois => \&hWhois );
 
@@ -643,6 +645,7 @@ sub handleRequest {
 
   my %aliases=( ae => 'adminEvents',
                 cps => 'checkProbSmurfs',
+                ips => 'checkIps',
                 ja => 'joinAcc',
                 lb => 'leaderboard',
                 ns => 'notSmurf',
@@ -652,6 +655,8 @@ sub handleRequest {
                 sn => 'setName',
                 su => 'searchUser',
                 ts => 'topSkill',
+                uips => 'checkUserIps',
+                uw => 'uwhois',
                 w => 'whois' );
   if(exists $aliases{$lcCmd}) {
     $lcCmd=lc($aliases{$lcCmd});
@@ -1356,6 +1361,8 @@ sub hJoinAcc {
     my ($firstId,$lastId)=$id1 < $id2 ? ($id1,$id2) : ($id2,$id1);
     $sldb->do("insert into smurfs values ($firstId,$lastId,1,$lobby->{users}->{$user}->{accountId})","add sticky smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
   }
+
+  $sldb->computeAllUserIps($mainUserId,30,512);
 
   my $message="Joined user account $childUserId into account $mainUserId";
   $message.=' (sticky)' if($sticky);
@@ -2271,11 +2278,14 @@ sub hSplitAcc {
     my ($firstId,$lastId)=$userId < $accountId ? ($userId,$accountId) : ($accountId,$userId);
     $sldb->adminEvent('ADD_NOT_SMURF',0,1,$lobby->{users}->{$user}->{accountId},{accountId1 => $firstId, accountId2 => $lastId});
     $sldb->do("insert into smurfs values ($firstId,$lastId,0,$lobby->{users}->{$user}->{accountId})","add not-smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
-  }  
+  }
 
-   my $message="Detached user ID $newUserId (account ID(s): $smurfGroupString) from user ID $userId";
-   $message.=' (sticky)' if($sticky);
-   answer($message);
+  $sldb->computeAllUserIps($newUserId,30,512);
+  $sldb->computeAllUserIps($userId,30,512);
+
+  my $message="Detached user ID $newUserId (account ID(s): $smurfGroupString) from user ID $userId";
+  $message.=' (sticky)' if($sticky);
+  answer($message);
 }
 
 sub hTopSkill {
@@ -2301,10 +2311,11 @@ sub hVersion {
   }
 
 }
+
 sub hCheckIps {
   my ($source,$user,$p_params)=@_;
   if($#{$p_params} != 0) {
-    invalidSyntax($user,'whois');
+    invalidSyntax($user,'checkips');
     return 0;
   }
 
@@ -2358,8 +2369,77 @@ sub hCheckIps {
 
 }
 
+sub hCheckUserIps {
+  my ($source,$user,$p_params)=@_;
+  if($#{$p_params} != 0) {
+    invalidSyntax($user,'checkuserips');
+    return 0;
+  }
+
+  my $accountId;
+  my $accountString=$p_params->[0];
+  if($accountString =~ /^\#(\d+)$/) {
+    $accountId=$1;
+  }else{
+    $accountId=$sldb->identifyUniqueAccountByStringUserFirst($accountString);
+    if(! defined $accountId) {
+      answer("No account found for search string \"$accountString\" !");
+    }elsif($accountId == -1) {
+      answer("Multiple account names match your search string \"$accountString\", use more specific search string or use !searchUser command first");
+    }elsif($accountId == -2) {
+      answer("Multiple user names contain your search string \"$accountString\", use more specific search string or use !searchUser command first");
+    }elsif($accountId == -3) {
+      answer("Multiple account names contain your search string \"$accountString\", use more specific search string or use !searchUser command first");
+    }
+    return 0 unless(defined $accountId && $accountId > 0);
+  }
+  my $sth=$sldb->prepExec("select ua.userId,ud.name from userAccounts ua,userDetails ud where ua.accountId=$accountId and ua.userId=ud.userId");
+  my @results=$sth->fetchrow_array();
+  if(! @results) {
+    answer("Unknown account ID $accountId !");
+    return 0;
+  }
+  my ($userId,$userName)=@results;
+
+  my $p_ips=$sldb->getUserIps($userId);
+  if(! %{$p_ips}) {
+    answer("No IP found for user ID $userId.");
+    return 0;
+  }
+
+  my ($p_C,$B)=initUserIrcColors($user);
+  my %C=%{$p_C};
+
+  my @ipData;
+  foreach my $ip (sort {$a <=> $b} (keys %{$p_ips})) {
+    my $ipVal=intToIp($ip);
+    if(exists $p_ips->{$ip}->{ip2}) {
+      my $ip2Val=intToIp($p_ips->{$ip}->{ip2});
+      $ipVal.=" - $ip2Val";
+    }
+    push(@ipData,{"$C{5}IP" => $ipVal, LastSeen => $p_ips->{$ip}->{lastSeen}});
+  }
+
+  my $p_resultLines=formatArray(["$C{5}IP",'LastSeen'],\@ipData,"$C{2}In-game IPs for user \#$userId");
+  sayPrivate($user,'.');
+  foreach my $resultLine (@{$p_resultLines}) {
+    sayPrivate($user,$resultLine);
+  }
+
+}
+
 sub hWhois {
   my ($source,$user,$p_params)=@_;
+  genericWhois('account',$source,$user,$p_params);
+}
+
+sub hUWhois {
+  my ($source,$user,$p_params)=@_;
+  genericWhois('user',$source,$user,$p_params);
+}
+
+sub genericWhois {
+  my ($mode,$source,$user,$p_params)=@_;
   if($#{$p_params} != 0 && $#{$p_params} != 1) {
     invalidSyntax($user,'whois');
     return 0;
@@ -2383,7 +2463,11 @@ sub hWhois {
   if($accountString =~ /^\#(\d+)$/) {
     $accountId=$1;
   }else{
-    $accountId=$sldb->identifyUniqueAccountByString($accountString);
+    if($mode eq 'user') {
+      $accountId=$sldb->identifyUniqueAccountByStringUserFirst($accountString);
+    }else{
+      $accountId=$sldb->identifyUniqueAccountByString($accountString);
+    }
     if(! defined $accountId) {
       answer("No account found for search string \"$accountString\" !");
     }elsif($accountId == -1) {

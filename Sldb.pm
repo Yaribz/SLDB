@@ -335,6 +335,7 @@ create table if not exists userDetails (
   clanTag char(18),
   email varchar(64),
   forumId int unsigned,
+  nbIps int unsigned,
   unique index (name)
 ) engine=MyISAM','create table "userDetails"');
 
@@ -359,6 +360,28 @@ create table if not exists ipRanges (
   index (ip2),
   index (lastSeen)
 ) engine=MyISAM','create table "ipRanges"');
+
+  $self->do('
+create table if not exists userIps (
+  userId int unsigned,
+  ip int unsigned,
+  lastSeen timestamp,
+  primary key (userId,ip),
+  index (ip),
+  index (lastSeen)
+) engine=MyISAM','create table "userIps"');
+
+  $self->do('
+create table if not exists userIpRanges (
+  userId int unsigned,
+  ip1 int unsigned,
+  ip2 int unsigned,
+  lastSeen timestamp,
+  primary key (userId,ip1),
+  index (ip1),
+  index (ip2),
+  index (lastSeen)
+) engine=MyISAM','create table "userIpRanges"');
 
   $self->do('
 create table if not exists smurfs (
@@ -1062,7 +1085,7 @@ sub getSkills {
         $smurfFilter=join(',',@smurfs,@notSmurfs);
         $smurfFilter=" and ua.userId not in ($smurfFilter)";
       }
-      $sth=$self->prepExec("select ua.userId from accounts a,userAccounts ua,ipRanges ipr,tsPlayers tsp where tsp.period=$period and ua.accountId=a.id and ua.accountId=ipr.accountId and ua.userId=tsp.userId and bot=0 and noSmurf=0 and modShortName=$quotedModShortName and ua.userId != $userId$smurfFilter and ip1 <= INET_ATON($quotedIp) and ip2 >= INET_ATON($quotedIp) order by skill desc limit 1");
+      $sth=$self->prepExec("select ua.userId from accounts a,userAccounts ua,userIpRanges ipr,tsPlayers tsp where tsp.period=$period and ua.accountId=a.id and ua.accountId=ipr.userId and ua.userId=tsp.userId and bot=0 and noSmurf=0 and modShortName=$quotedModShortName and ua.userId != $userId$smurfFilter and ip1 <= INET_ATON($quotedIp) and ip2 >= INET_ATON($quotedIp) order by skill desc limit 1");
       @foundData=$sth->fetchrow_array();
       push(@smurfs,$foundData[0]) if(@foundData);
     }
@@ -1241,6 +1264,112 @@ sub getTopPlayers {
 # Smurf management functions #
 ##############################
 
+sub ipToInt {
+  my ($self,$ip)=@_;
+  my $int=0;
+  $int=$1*(256**3)+$2*(256**2)+$3*256+$4 if ($ip =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  return $int;
+}
+
+# Called by computeAllUserIps()
+sub isReservedIpNb {
+  my ($self,$ipNb)=@_;
+  my @reservedIps=(['0.0.0.0','0.255.255.255'],
+                   ['10.0.0.0','10.255.255.255'],
+                   ['100.64.0.0','100.127.255.255'],
+                   ['127.0.0.0','127.255.255.255'],
+                   ['169.254.0.0','169.254.255.255'],
+                   ['172.16.0.0','172.31.255.255'],
+                   ['192.0.0.0','192.0.0.255'],
+                   ['192.0.2.0','192.0.2.255'],
+                   ['192.168.0.0','192.168.255.255'],
+                   ['198.18.0.0','198.19.255.255'],
+                   ['198.51.100.0','198.51.100.255'],
+                   ['203.0.113.0','203.0.113.255'],
+                   ['224.0.0.0','239.255.255.255'],
+                   ['255.255.255.255','255.255.255.255']);
+  foreach my $p_reservedRange (@reservedIps) {
+    return 1 if($self->ipToInt($p_reservedRange->[0]) <= $ipNb && $ipNb <= $self->ipToInt($p_reservedRange->[1]));
+  }
+  return 0;
+}
+
+# Called by computeAllUserIps()
+sub getFirstRangeAddr {
+  my $ip=shift;
+  $ip-=$ip%256;
+  return $ip;
+}
+
+# Called by computeAllUserIps()
+sub getLastRangeAddr {
+  my $ip=shift;
+  $ip=$ip-($ip%256)+255;
+  return $ip;
+}
+
+# Called by sldbLi.pl, slMonitor.pl
+sub computeAllUserIps {
+  my ($self,$userId,$dynIpThreshold,$dynIpRange)=@_;
+  $self->do("delete from userIps where userId=$userId","flush ip addresses for userId \"$userId\" in table userIps");
+  $self->do("delete from userIpRanges where userId=$userId","flush ip addresses for userId \"$userId\" in table userIpRanges");
+  $self->do("update userDetails set nbIps=0 where userId=$userId","reset IP counter in userDetails table for userId \"$userId\"");
+  my $sth=$self->prepExec("select pd.ip,UNIX_TIMESTAMP(max(gd.endTimestamp)) from playersDetails pd,gamesDetails gd,userAccounts ua where ua.userId=$userId and ua.accountId=pd.accountId and pd.ip is not null and pd.ip != 0 and pd.gameId=gd.gameId group by pd.ip order by pd.ip","list all user IPs from tables playersDetails,gamesDetails,userAccounts for userId $userId");
+  my $p_results=$sth->fetchall_arrayref();
+  my @seenIps;
+  foreach my $p_result (@{$p_results}) {
+    next if($self->isReservedIpNb($p_result->[0]));
+    push(@seenIps,$p_result);
+  }
+  return unless(@seenIps);
+  my $nbIps=$#seenIps+1;
+  if($nbIps < $dynIpThreshold) {
+    foreach my $p_seenIp (@seenIps) {
+      $self->do("insert into userIps values ($userId,$p_seenIp->[0],FROM_UNIXTIME($p_seenIp->[1]))","insert new ip \"$p_seenIp->[0]\" for userId \"$userId\" in table userIps");
+    }
+    $self->do("update userDetails set nbIps=$nbIps where userId=$userId","set IP counter to $nbIps for userId \"$userId\" in userDetails table");
+  }else{
+    my (@isolatedIps,@ranges);
+    my ($rangeStart,$rangeEnd,$rangeTs)=(0,0,0);
+    foreach my $p_seenIp (@seenIps) {
+      if($rangeEnd) {
+        if(getFirstRangeAddr($p_seenIp->[0])-$rangeEnd <= $dynIpRange) {
+          $rangeEnd=getLastRangeAddr($p_seenIp->[0]);
+          $rangeTs=$p_seenIp->[1] if($p_seenIp->[1] > $rangeTs);
+        }else{
+          push(@ranges,[$rangeStart,$rangeEnd,$rangeTs]);
+          ($rangeStart,$rangeEnd,$rangeTs)=($p_seenIp->[0],0,$p_seenIp->[1]);
+        }
+      }elsif($rangeStart) {
+        if(getFirstRangeAddr($p_seenIp->[0])-$rangeStart <= $dynIpRange) {
+          $rangeStart=getFirstRangeAddr($rangeStart);
+          $rangeEnd=getLastRangeAddr($p_seenIp->[0]);
+          $rangeTs=$p_seenIp->[1] if($p_seenIp->[1] > $rangeTs);
+        }else{
+          push(@isolatedIps,[$rangeStart,$rangeTs]);
+          ($rangeStart,$rangeTs)=($p_seenIp->[0],$p_seenIp->[1]);
+        }
+      }else{
+        ($rangeStart,$rangeTs)=($p_seenIp->[0],$p_seenIp->[1]);
+      }
+    }
+    if($rangeEnd) {
+      push(@ranges,[$rangeStart,$rangeEnd,$rangeTs]);
+    }elsif($rangeStart) {
+      push(@isolatedIps,[$rangeStart,$rangeTs]);
+    }else{
+      error("Inconsistent state while processing dynamic user ip ranges detection");
+    }
+    foreach my $p_isolatedIp (@isolatedIps) {
+      $self->do("insert into userIps values ($userId,$p_isolatedIp->[0],FROM_UNIXTIME($p_isolatedIp->[1]))","insert ip addresses for user \"$userId\" in table userIps for dynamic ip ranges detection");
+    }
+    foreach my $p_range (@ranges) {
+      $self->do("insert into userIpRanges values ($userId,$p_range->[0],$p_range->[1],FROM_UNIXTIME($p_range->[2]))","insert ip ranges for user \"$userId\" in table userIpRanges for dynamic ip ranges detection");
+    }
+    $self->do("update userDetails set nbIps=$dynIpThreshold where userId=$userId","set nbIps to $dynIpThreshold for userId \"$userId\" in userDetails table");
+  }
+}
+
 # Called by sldbLi.pl
 sub getAccountIps {
   my ($self,$accId)=@_;
@@ -1253,6 +1382,25 @@ sub getAccountIps {
   }
 
   $sth=$self->prepExec("select ip1,ip2,lastSeen from ipRanges where accountId=$accId","query ipRanges for ip ranges of account \"$accId\"");
+  while(@ipData=$sth->fetchrow_array()) {
+    $ips{$ipData[0]}={ip2 => $ipData[1], lastSeen => $ipData[2]};
+  }
+
+  return \%ips;
+}
+
+# Called by sldbLi.pl
+sub getUserIps {
+  my ($self,$userId)=@_;
+
+  my $sth=$self->prepExec("select ip,lastSeen from userIps where userId=$userId","query userIps for ips of user \"$userId\"");
+  my %ips;
+  my @ipData;
+  while(@ipData=$sth->fetchrow_array()) {
+    $ips{$ipData[0]}={lastSeen => $ipData[1]};
+  }
+
+  $sth=$self->prepExec("select ip1,ip2,lastSeen from userIpRanges where userId=$userId","query userIpRanges for ip ranges of user \"$userId\"");
   while(@ipData=$sth->fetchrow_array()) {
     $ips{$ipData[0]}={ip2 => $ipData[1], lastSeen => $ipData[2]};
   }

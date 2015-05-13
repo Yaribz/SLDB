@@ -3,10 +3,13 @@
 "!adminEvents 1y JOIN_ACC * 1" shows all admin events of type "JOIN_ACC" that occured over the past year, with any subType and orig=1
 
 [checkIps]
-!checkIps <name>|#<accountId> - list known in-game IPs for the account identified uniquely by his name <name> or by his ID <accountId>
+!checkIps <name>|#<accountId> - list known in-game IPs for the account identified uniquely by his name <name> or by his ID <accountId> [alias: !ips]
 
 [checkProbSmurfs]
 !checkProbSmurfs [<maxAge>] - list probable smurfs (default <maxAge> is 6m) [alias: !cps]
+
+[checkUserIps]
+!checkUserIps <name>|#<accountId> - list known in-game IPs for the user identified uniquely by his name <name> or by his ID <accountId> [alias: !uips]
 
 [help]
 !help [<command>] - lists allowed SLDB commands (print examples for command <command> if <command> is specified)
@@ -70,6 +73,11 @@
 [topSkill]
 !topSkill <modShortName> [<gameType> [-][<nbPlayers>]] - shows a top <nbPlayers> leaderboard for a given MOD and gameType, using estimated skill [alias: !ts]
 "!topSkill ZK Team 50" shows a leaderboard with top 50 Zero-K team players
+
+[uwhois]
+!uwhois [-f] <name>|#<accountId> - show information for the user account identified uniquely by name <name> or ID <accountId>, "-f" = full [alias: !uw]
+"!whois joe" prints account information for user "joe"
+"!whois #1234" prints account information for account ID 1234
 
 [version]
 !version - requests versions of all bot components

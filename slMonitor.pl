@@ -526,13 +526,6 @@ sub sayPrivate {
   }
 }
 
-sub ipToInt {
-  my $ip=shift;
-  my $int=0;
-  $int=$1*(256**3)+$2*(256**2)+$3*256+$4 if ($ip =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  return $int;
-}
-
 sub getFirstRangeAddr {
   my $ip=shift;
   $ip-=$ip%256;
@@ -561,7 +554,7 @@ sub seenUser {
   my $quotedName=$sldb->quote($sldb->findAvailableUserName($name));
 
   $sldb->do("insert into userAccounts values ($id,$id,0,0)","insert data in table userAccounts");
-  $sldb->do("insert into userDetails values ($id,$quotedName,$clan,NULL,NULL)","insert data in table userDetails");
+  $sldb->do("insert into userDetails values ($id,$quotedName,$clan,NULL,NULL,0)","insert data in table userDetails");
 }
 
 sub initializeUserTablesIfNeeded {
@@ -602,19 +595,21 @@ sub seenHardwareId {
     $sldb->queueGlobalRerate($p_accountId->[0]);
   }
   $sldb->do("update userAccounts set userId=$userId where userId=$smurfId","update data in table userAccounts for new smurf found \"$smurfId\" of \"$userId\"");
+  $sldb->computeAllUserIps($userId,$conf{dynIpThreshold},$conf{dynIpRange});
 }
 
 sub seenIp {
   my ($id,$ip,$date)=@_;
+
   if(defined $date) {
     $date="FROM_UNIXTIME($date)";
   }else{
-    $date="now()";
+    $date='now()';
   }
 
   my $ipNb;
   if($ip =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/) {
-    $ipNb=ipToInt($ip);
+    $ipNb=$sldb->ipToInt($ip);
     if(! $ipNb) {
       slog("Unable to convert ip to number ($ip)!",2);
       return 0;
@@ -623,37 +618,76 @@ sub seenIp {
     $ipNb=$ip;
   }
 
-  my @reservedIps=(['0.0.0.0','0.255.255.255'],
-                   ['10.0.0.0','10.255.255.255'],
-                   ['100.64.0.0','100.127.255.255'],
-                   ['127.0.0.0','127.255.255.255'],
-                   ['169.254.0.0','169.254.255.255'],
-                   ['172.16.0.0','172.31.255.255'],
-                   ['192.0.0.0','192.0.0.7'],
-                   ['192.0.2.0','192.0.2.255'],
-                   ['192.168.0.0','192.168.255.255'],
-                   ['192.18.0.0','192.19.255.255'],
-                   ['198.51.100.0','198.51.100.255'],
-                   ['203.0.113.0','203.0.113.255'],
-                   ['224.0.0.0','239.255.255.255'],
-                   ['255.255.255.255','255.255.255.255']);
-  for my $i (0..$#reservedIps) {
-    my ($start,$end)=(ipToInt($reservedIps[$i]->[0]),ipToInt($reservedIps[$i]->[1]));
-    if($start <= $ipNb && $ipNb <= $end) {
-#      slog("Ignoring reserved ip \"$ip\" (range \#$i)",2);
-      return 0;
+  return 0 if($sldb->isReservedIpNb($ipNb));
+
+  my $sth=$sldb->prepExec("select ua.userId,ua.nbIps,ud.nbIps from userAccounts ua,userDetails ud where ua.accountId=$id and ua.userId=ud.userId","query id \"$id\" in userAccounts and userDetails");
+  my @foundData=$sth->fetchrow_array();
+  if(! @foundData) {
+    slog("Unable to retrieve data for id \"$id\" in userAccounts and userDetails, ignoring ip \"$ip\"!",2);
+    return 0;
+  }
+  my ($userId,$nbIps,$nbUserIps)=@foundData;
+
+  my @ipCount;
+  if($date eq 'now()') {
+    $sth=$sldb->prepExec("select count(*) from userIps where userId=$userId and ip=$ipNb","check if ip \"$ip\" for userId \"$userId\" is already known in userIps table");
+    @ipCount=$sth->fetchrow_array();
+    if($ipCount[0] > 0) {
+      $sldb->do("update userIps set lastSeen=$date where userId=$userId and ip=$ipNb","update ip last seen date in table userIps");
+    }else{
+      if($nbUserIps < $conf{dynIpThreshold}) {
+        $sldb->do("insert into userIps values ($userId,$ipNb,$date)","insert new ip \"$ip\" for userId \"$userId\" in table userIps");
+        $sldb->do("update userDetails set nbIps=nbIps+1 where userId=$userId","increment nbIps for userId \"$userId\" in table userDetails");
+      }
+      if($nbUserIps == $conf{dynIpThreshold}-1) {
+        slog("User \#$userId has been detected as using dynamic IP, starting dynamic IP ranges detection...",3);
+        $sldb->computeAllUserIps($userId,$conf{dynIpThreshold},$conf{dynIpRange});
+      }elsif($nbUserIps > $conf{dynIpThreshold}-1) {
+        $sth=$sldb->prepExec("select count(*) from userIpRanges where userId=$userId and ip1 <= $ipNb and $ipNb <= ip2","check if ip \"$ip\" for userId \"$userId\" is already known in userIpRanges table");
+        @ipCount=$sth->fetchrow_array();
+        if($ipCount[0] > 0) {
+          $sldb->do("update userIpRanges set lastSeen=$date where userId=$userId and ip1 <= $ipNb and $ipNb <= ip2","update ip last seen date in table userIpRanges");
+        }else{
+          $sth=$sldb->prepExec("select ip from userIps where userId=$userId and ABS(cast(ip as signed) - $ipNb) <= $conf{dynIpRange}","query userIps table for neighbour ips of \"$ip\" for userId \"$userId\"");
+          my @neighbourIps;
+          while(@foundData=$sth->fetchrow_array()) {
+            push(@neighbourIps,$foundData[0]);
+          }
+          my @sortedIps=sort {$a <=> $b} (@neighbourIps,$ipNb);
+          my ($rangeStart,$rangeEnd)=($sortedIps[0],$sortedIps[$#sortedIps]);
+          if($rangeStart<$rangeEnd) {
+            $rangeStart=getFirstRangeAddr($rangeStart);
+            $rangeEnd=getLastRangeAddr($rangeEnd);
+          }
+          $sth=$sldb->prepExec("select ip1,ip2 from userIpRanges where userId=$userId and (($rangeStart >= ip1 and $rangeStart <= ip2+$conf{dynIpRange}) or ($rangeEnd >= ip1-$conf{dynIpRange} and $rangeEnd <= ip2) or ($rangeStart < ip1 and $rangeEnd > ip2))","query userIpRanges table for neighbour ranges of userId \"$userId\"");
+          my @neighbourRanges;
+          while(@foundData=$sth->fetchrow_array()) {
+            push(@neighbourRanges,$foundData[0]);
+            $rangeStart=$foundData[0] if($foundData[0]<$rangeStart);
+            $rangeEnd=$foundData[1] if($foundData[1]>$rangeEnd);
+          }
+          if(@neighbourIps) {
+            my $neighbourIpsString=join(',',@neighbourIps);
+            $sldb->do("delete from userIps where userId=$userId and ip in ($neighbourIpsString)","remove aggregated ip addresses for userId \"$userId\" in table userIps during dynamic ip ranges detection");
+          }
+          if(@neighbourRanges) {
+            my $neighbourRangesString=join(',',@neighbourRanges);
+            $sldb->do("delete from userIpRanges where userId=$userId and ip1 in ($neighbourRangesString)","remove aggregated ip ranges for userId \"$userId\" in table userIpRanges during dynamic ip ranges detection");
+          }
+          if($rangeStart<$rangeEnd) {
+            $rangeStart=getFirstRangeAddr($rangeStart);
+            $rangeEnd=getLastRangeAddr($rangeEnd);
+            $sldb->do("insert into userIpRanges values ($userId,$rangeStart,$rangeEnd,$date)","insert aggregated range for userId \"$userId\" in table userIpRanges during dynamic ip ranges detection");
+          }else{
+            $sldb->do("insert into userIps values ($userId,$ipNb,$date)","insert new ip \"$ip\" for userId \"$userId\" in table userIps");
+          }
+        }
+      }
     }
   }
 
-  my $sth=$sldb->prepExec("select userId,nbIps from userAccounts where accountId=$id","query id \"$id\" in userAccounts");
-  my @foundData=$sth->fetchrow_array();
-  if(! @foundData) {
-    slog("Unable to retrieve data for id \"$id\" in userAccounts, ignoring ip \"$ip\"!",2);
-    return 0;
-  }
-  my ($userId,$nbIps)=@foundData;
   $sth=$sldb->prepExec("select count(*) from ips where accountId=$id and ip=$ipNb","check if ip \"$ip\" for id \"$id\" is already known in ips table!");
-  my @ipCount=$sth->fetchrow_array();
+  @ipCount=$sth->fetchrow_array();
   if($ipCount[0] > 0) {
     $sldb->do("update ips set lastSeen=$date where accountId=$id and ip=$ipNb","update ip last seen date in table ips");
     return 1;
@@ -834,6 +868,7 @@ sub checkSmurf {
           $sldb->queueGlobalRerate($p_accountId->[0]);
         }
         $sldb->do("update userAccounts set userId=$newUserId where userId=$oldUserId","update data in table userAccounts for new smurf found \"$oldUserId\" of \"$newUserId\"");
+        $sldb->computeAllUserIps($newUserId,$conf{dynIpThreshold},$conf{dynIpRange});
       }
       
       # Probable smurf detection (search of dynamic IP ranges matching one IP)
@@ -1067,6 +1102,10 @@ sub detachSmurfGroup {
     $sldb->queueGlobalRerate($id);
   }
   $sldb->do("update userAccounts set userId=$newUserId where accountId in ($smurfGroupString)","update userAccounts for new main account \"$newUserId\" for smurf group \"$smurfGroupString\"");
+
+  $sldb->computeAllUserIps($newUserId,$conf{dynIpThreshold},$conf{dynIpRange});
+  $sldb->computeAllUserIps($oldUserId,$conf{dynIpThreshold},$conf{dynIpRange});
+
   return $newUserId;
 }
 
@@ -1106,6 +1145,19 @@ sub initializeIpTablesIfNeeded {
   }
 
   slog("IP and smurf tables initialization done.",3);
+}
+
+sub initializeUserIpTablesIfNeeded {
+  my $sth=$sldb->prepExec("select count(*) from userIps","check userIps state in database!");
+  my @ipCount=$sth->fetchrow_array();
+  return if($ipCount[0] > 0);
+  slog("Initializing user IP tables from \"playersDetails\" and \"gamesDetails\" tables",3);
+  $sth=$sldb->prepExec("select userId from userAccounts where userId=accountId","get all userIds from userAccounts table for user IP tables initialization");
+  my $p_results=$sth->fetchall_arrayref();
+  foreach my $p_userId (@{$p_results}) {
+    $sldb->computeAllUserIps($p_userId->[0],$conf{dynIpThreshold},$conf{dynIpRange});
+  }
+  slog("User IP tables initialization done.",3);
 }
 
 sub isValidGDR {
@@ -1409,6 +1461,7 @@ sub endMonitoring {
 
 initializeUserTablesIfNeeded();
 initializeIpTablesIfNeeded();
+initializeUserIpTablesIfNeeded();
 
 while(! $stopping) {
   if(! $lobbyState) {
