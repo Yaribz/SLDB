@@ -314,13 +314,13 @@ sub getBattleDetail {
     $bDetails{startDate}=$manualStartTsBattles{$bId};
   }else{
     my $replayLink=$mainDiv->look_down(_tag => 'a',
-                                       sub {defined $_[0]->attr('href') && $_[0]->attr('href') =~ /^$conf{baseUrl}\/replays\/\d+_\d+_.*\.sdf$/});
+                                       sub {defined $_[0]->attr('href') && $_[0]->attr('href') =~ /\/replays\/\d+_\d+_.*\.sdf$/});
     if(! $replayLink) {
       $tree->delete;
       return { skip => 1 };
       error("Unable to find replay link in battle detail page of battle \#$bId");
     }
-    if($replayLink->attr('href')=~ /^$conf{baseUrl}\/replays\/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2}+)_.*\.sdf$/) {
+    if($replayLink->attr('href')=~ /\/replays\/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2}+)_.*\.sdf$/) {
       my $replayStartTime=Time::Piece->strptime("$1-$2-$3 $4:$5:$6",'%Y-%m-%d %T');
       $replayStartTime+=$conf{timeshift};
       $bDetails{startDate}=$replayStartTime->strftime('%F %T');
@@ -640,7 +640,7 @@ my @gameIdFound;
 while(@gameIdFound=$sth->fetchrow_array()) {
   if($gameIdFound[0] =~ /^zk-(\d+)$/) {
     $latestProcessedGameId=$1 unless(defined $latestProcessedGameId && $latestProcessedGameId > $1);
-    $latestProcessedGameId=293417 if(defined $latestProcessedGameId && $latestProcessedGameId < 293417);
+    $latestProcessedGameId=316106 if(defined $latestProcessedGameId && $latestProcessedGameId < 316106);
   }
 }
 $nextBattleId=$latestProcessedGameId+1 if(defined $latestProcessedGameId);
