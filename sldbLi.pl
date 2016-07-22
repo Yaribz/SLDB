@@ -1471,7 +1471,7 @@ sub genericLeaderboard {
   if(@resultData) {
     my $title='Top';
     $title='Worst' if($mode eq 'bottom');
-    $title.=" $nbPlayers $modShortName";
+    $title.=" $nbPlayers ".$sldb->getModNameFromShortName($modShortName);
     $title.=" $gameType" if($gameType ne 'Global');
     $title.=' player';
     $title.='s' if($nbPlayers > 1);

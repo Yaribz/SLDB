@@ -770,6 +770,16 @@ sub setUserPref {
 #####################################
 
 # Called by sldbLi.pl
+sub getModNameFromShortName {
+  my ($self,$modShortName)=@_;
+  my $quotedModShortName=$self->quote($modShortName);
+  my $sth=$self->prepExec("select name from gamesNames where shortName=$quotedModShortName");
+  my @found=$sth->fetchrow_array();
+  return $found[0] if(@found);
+  return undef;
+}
+
+# Called by sldbLi.pl
 sub getModShortName {
   my ($self,$mod)=@_;
   my $quotedMod=$self->quote($mod);
