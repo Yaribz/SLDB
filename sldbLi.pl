@@ -97,8 +97,6 @@ my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       version => \&hVersion,
                       whois => \&hWhois );
 
-my %skillGraphReportPids;
-
 # Basic checks ################################################################
 
 if($#ARGV != 0 || ! (-f $ARGV[0])) {
@@ -149,6 +147,7 @@ my %hostSkills;
 my %battleHosts;
 my %newGamesFinished;
 my %hostsVersions;
+my %forkedProcesses;
 
 my $sldbSimpleLog=SimpleLog->new(logFiles => [$conf{logDir}."/sldbLi.log",''],
                                  logLevels => [$conf{sldbLogLevel},3],
@@ -200,17 +199,27 @@ sub sigChldHandler {
 
 sub handleSigChld {
   my ($childPid,$exitCode,$signalNb,$hasCoreDump)=@_;
-  if(exists $skillGraphReportPids{$childPid}) {
-    if($lobbyState >= 4 && exists $lobby->{users}->{$skillGraphReportPids{$childPid}->{orig}}) {
-      if($exitCode) {
-        sayPrivate($skillGraphReportPids{$childPid}->{orig},"Unable to generate online $skillGraphReportPids{$childPid}->{mod} TrueSkill graphs for $skillGraphReportPids{$childPid}->{userName}");
-      }else{
-        sayPrivate($skillGraphReportPids{$childPid}->{orig},"Online $skillGraphReportPids{$childPid}->{mod} TrueSkill graphs for $skillGraphReportPids{$childPid}->{userName} available at $skillGraphReportPids{$childPid}->{url}");
-      }
-    }
-    delete $skillGraphReportPids{$childPid};
+  if(exists $forkedProcesses{$childPid}) {
+    &{$forkedProcesses{$childPid}}($exitCode,$signalNb,$hasCoreDump);
+    delete $forkedProcesses{$childPid};
   }else{
     slog("Received a CHLD signal for unknown process! (PID:$childPid, exitCode:$exitCode)",2);
+  }
+}
+
+sub forkProcess {
+  my ($p_processFunction,$p_endCallback)=@_;
+  my $childPid = fork();
+  if(! defined $childPid) {
+    slog("Unable to fork process !",1);
+    return 0;
+  }elsif($childPid == 0) {
+    $SIG{CHLD}='';
+    &{$p_processFunction}();
+    exit 0;
+  }else{
+    $forkedProcesses{$childPid}=$p_endCallback;
+    return $childPid;
   }
 }
 
@@ -2084,33 +2093,44 @@ sub hSkillGraph {
   }
 }
 
+sub forkedOnlineReportGeneration {
+  my ($userId,$userName,$modShortName,$tmpSubDir)=@_;
+  $sldb=Sldb->new({dbDs => $sldbDs,
+                   dbLogin => $sldbLogin,
+                   dbPwd => $sldbPasswd,
+                   sLog => $sldbSimpleLog,
+                   sqlErrorHandler => \&sqlErrorHandler });
+  if(! $sldb->connect()) {
+    slog("Unable to connect to SLDB",1);
+    exit 1;
+  }
+  my $uploadRes=uploadSkillReport($userId,$userName,$modShortName,$tmpSubDir);
+  exit $uploadRes;
+}
+
+sub onlineReportComplete {
+  my ($url,$orig,$userName,$mod,$exitCode)=@_;
+  if($lobbyState >= 4 && exists $lobby->{users}->{$orig}) {
+    if($exitCode) {
+      sayPrivate($orig,"Unable to generate online $mod TrueSkill graphs for $userName");
+    }else{
+      sayPrivate($orig,"Online $mod TrueSkill graphs for $userName available at $url");
+    }
+  }
+}
+
 sub generateOnlineReport {
   use Time::Piece;
 
   my ($userId,$userName,$modShortName,$orig)=@_;
   my $tmpSubDir="TrueSkillGraphs_${userId}_${modShortName}_".(localtime->strftime('%Y%m%d_%H%M%S'));
   
-  my $childPid = fork();
-  if(! defined $childPid) {
+  if(! forkProcess( sub { forkedOnlineReportGeneration($userId,$userName,$modShortName,$tmpSubDir); },
+                    sub { onlineReportComplete("http://planetspads.free.fr/sldb/$tmpSubDir/index.html",$orig,$userName,$modShortName,@_); } )) {
     slog("Unable to fork to generate online $modShortName TrueSkill report for user \#$userId",1);
     return 'technical error';
-  }elsif($childPid == 0) {
-    $SIG{CHLD}='';
-    $sldb=Sldb->new({dbDs => $sldbDs,
-                 dbLogin => $sldbLogin,
-                 dbPwd => $sldbPasswd,
-                 sLog => $sldbSimpleLog,
-                 sqlErrorHandler => \&sqlErrorHandler });
-    if(! $sldb->connect()) {
-      slog("Unable to connect to SLDB",1);
-      exit 1;
-    }
-    my $uploadRes=uploadSkillReport($userId,$userName,$modShortName,$tmpSubDir);
-    exit $uploadRes;
-  }else{
-    $skillGraphReportPids{$childPid}={url => "http://planetspads.free.fr/sldb/$tmpSubDir/index.html", orig => $orig, userName => $userName, userId => $userId, mod => $modShortName};
-    return 0;
   }
+  return 0;
 }
 
 sub uploadSkillReport {
