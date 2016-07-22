@@ -23,7 +23,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.1 (2013/11/27)
+# Version 0.1 (2016/07/22)
 
 use strict;
 
@@ -256,6 +256,7 @@ sub cbAddUser {
   }
   seenUser($user,$id);
   $lobby->sendCommand(['GETUSERID',$user]);
+  $lobby->sendCommand(['GETIP',$user]);
   ($user,$country)=$sldb->quote($user,$country);
   $sldb->do("insert into names values ($id,$user,now()) on duplicate key update lastConnection=now()","insert or update names table for account \"$id\" and name \"$user\"");
   $sldb->do("insert into countries values ($id,$country,now()) on duplicate key update lastConnection=now()","insert or update countries table for account \"$id\" and country \"$country\"");
@@ -502,6 +503,8 @@ sub cbServerMsg {
     }else{
       slog("Ignoring hardwareId \"$hardwareId\" received for offline user \"$user\"",4);
     }
+  }elsif($msg =~ /^<([^>]+)> is currently bound to (\d+\.\d+\.\d+\.\d+)/) {
+    seenLobbyIp($1,$2);
   }
 }
 
@@ -596,6 +599,67 @@ sub seenHardwareId {
   }
   $sldb->do("update userAccounts set userId=$userId where userId=$smurfId","update data in table userAccounts for new smurf found \"$smurfId\" of \"$userId\"");
   $sldb->computeAllUserIps($userId,$conf{dynIpThreshold},$conf{dynIpRange});
+}
+
+sub seenLobbyIp {
+  my ($user,$ip)=@_;
+  return unless(exists $lobby->{users}->{$user});
+  my $id=$lobby->{users}->{$user}->{accountId};
+
+  my $ipNb;
+  if($ip =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/) {
+    $ipNb=$sldb->ipToInt($ip);
+    if(! $ipNb) {
+      slog("Unable to convert ip to number in seenLobbyIp ($ip)!",2);
+      return 0;
+    }
+  }elsif($ip =~ /^\d+$/) {
+    $ipNb=$ip;
+  }else{
+    slog("Invalid ip in seenLobbyIp ($ip)!",2);
+    return 0;
+  }
+
+  my $sth=$sldb->prepExec("select bot,noSmurf from accounts,userAccounts where id=$id and accountId=$id","check bot and noSmurf flags for account \"$id\" in tables accounts and userAccounts!");
+  my @foundData=$sth->fetchrow_array();
+  if($foundData[0] || $foundData[1]) {
+    slog("Skipping smurf detection from lobby IP for account \"$id\" (bot=$foundData[0], noSmurf=$foundData[1])",5);
+    return 1;
+  }
+  $sth=$sldb->prepExec("select userId from userAccounts where accountId=$id","query userAccounts for user id of account \"$id\"!");
+  @foundData=$sth->fetchrow_array();
+  error("Unable to find user id of account \"$id\" in userAccounts table!") unless(@foundData);
+  my $userId=$foundData[0];
+  
+  $sth=$sldb->prepExec("select rank from accounts where id=$userId","retrieve rank of account \"$userId\"");
+  @foundData=$sth->fetchrow_array();
+  error("Unable to find rank of user \"$userId\" in accounts table!") unless(@foundData);
+  my $userRank=$foundData[0];
+
+  # Smurf detection (search of static IPs matching one IP)
+  $sth=$sldb->prepExec("select userId,max(rank) maxRank from accounts,userAccounts,ips where id=userAccounts.accountId and id=ips.accountId and bot=0 and noSmurf=0 and userId != $userId and ip=$ipNb group by userId order by maxRank desc","search smurfs for ip $ipNb of user \"$userId\" in ips table");
+  my $p_newSmurfData=$sth->fetchall_arrayref();
+  foreach my $p_possibleSmurfUser (@{$p_newSmurfData}) {
+    my ($smurfId,$smurfRank)=($p_possibleSmurfUser->[0],$p_possibleSmurfUser->[1]);
+    my $mergeStatus=checkUserMerge($userId,$smurfId,1);
+    next unless($mergeStatus);
+    my ($oldUserId,$newUserId);
+    if($smurfRank < $userRank || ($smurfRank == $userRank && $userId < $smurfId)) {
+      ($oldUserId,$newUserId)=($smurfId,$userId);
+    }else{
+      ($oldUserId,$newUserId)=($userId,$smurfId);
+      ($userId,$userRank)=($smurfId,$smurfRank);
+    }
+    slog("Merging $oldUserId into $newUserId based on lobby IP!",3);
+    $sldb->adminEvent('JOIN_ACC',$mergeStatus,0,0,{mainUserId => $newUserId, childUserId => $oldUserId});
+    $sth=$sldb->prepExec("select accountId from userAccounts where userId=$oldUserId","retrieve smurfs list of user $oldUserId that will be joined with user $newUserId");
+    my $p_oldUserSmurfs=$sth->fetchall_arrayref();
+    foreach my $p_accountId (@{$p_oldUserSmurfs}) {
+      $sldb->queueGlobalRerate($p_accountId->[0]);
+    }
+    $sldb->do("update userAccounts set userId=$newUserId where userId=$oldUserId","update data in table userAccounts for new smurf found \"$oldUserId\" of \"$newUserId\"");
+    $sldb->computeAllUserIps($newUserId,$conf{dynIpThreshold},$conf{dynIpRange});
+  }
 }
 
 sub seenIp {
