@@ -1752,6 +1752,11 @@ sub hSearchUser {
   my @userIds;
   my %accountIds;
 
+  $p_params=[$p_params->[0].$p_params->[1].$p_params->[2]] if($#{$p_params}==2 
+                                                              && $p_params->[0] =~ /^\@(\d{1,3}(?:\.\d{1,3}){3})$/
+                                                              && $p_params->[1] eq '-'
+                                                              && $p_params->[2] =~ /^(\d{1,3}(?:\.\d{1,3}){3})$/);
+
   my ($search,$quotedSearch);
   if($#{$p_params}==0 && $p_params->[0] =~ /^\@(\d{1,3}(?:\.\d{1,3}){3})$/) {
     $search=$1;
