@@ -12,7 +12,7 @@
 !checkUserIps <name>|#<accountId> - list known in-game IPs for the user identified uniquely by his name <name> or by his ID <accountId> [alias: !uips]
 
 [help]
-!help [<command>] - lists allowed SLDB commands (print examples for command <command> if <command> is specified)
+!help [<command>] - lists allowed SLDB commands (print examples for command <command> if <command> is specified) [alias: !h]
 "!help" lists allowed commands
 "!help help" print examples for command help
 

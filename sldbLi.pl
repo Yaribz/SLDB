@@ -645,6 +645,7 @@ sub handleRequest {
 
   my %aliases=( ae => 'adminEvents',
                 cps => 'checkProbSmurfs',
+                h => 'help',
                 ips => 'checkIps',
                 ja => 'joinAcc',
                 lb => 'leaderboard',
