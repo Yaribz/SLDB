@@ -29,6 +29,7 @@ use strict;
 use POSIX (':sys_wait_h','ceil');
 
 use IO::Select;
+use List::Util 'first';
 use Text::ParseWords;
 
 use SimpleLog;
@@ -36,6 +37,11 @@ use Sldb;
 use SldbLiConf;
 
 use SpringLobbyInterface;
+
+sub any (&@) { my $c = shift; return defined first {&$c} @_; }
+sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
+sub none (&@) { my $c = shift; return ! defined first {&$c} @_; }
+sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 my $sldbLiVer='0.1';
 
@@ -1115,8 +1121,7 @@ sub hGetSkill {
       next;
     }
     my $playerName=$lobby->{accounts}->{$accountId};
-    my $quotedPlayerName=quotemeta($playerName);
-    if(! grep {/^$quotedPlayerName$/} @{$lobby->{battles}->{$hostBattles{$user}}->{userList}}) {
+    if(none {$playerName eq $_} @{$lobby->{battles}->{$hostBattles{$user}}->{userList}}) {
       slog("Unable to find player \"$playerName\" (ID $accountId) in battle (getSkill call from $user)",2);
       push(@returnParams,"$accountId|1");
       next;
@@ -1416,14 +1421,14 @@ sub genericLeaderboard {
   }
   $nbPlayers=100 if($nbPlayers > 100);
 
-  my $fixedModShorName=$sldb->fixModShortName($modShortName);
-  if(! defined $fixedModShorName) {
+  my $fixedModShortName=$sldb->fixModShortName($modShortName);
+  if(! defined $fixedModShortName) {
     my $p_allowedMods=$sldb->getModsShortNames();
     my $allowedModsString=join(',',@{$p_allowedMods});
     invalidSyntax($user,$lcCommand,"allowed games: $allowedModsString");
     return 0;
   }
-  $modShortName=$fixedModShorName;
+  $modShortName=$fixedModShortName;
 
   my ($p_C,$B)=initUserIrcColors($user);
   my %C=%{$p_C};
@@ -2019,14 +2024,14 @@ sub hSkillGraph {
 
   my ($modShortName,$accountString)=@{$p_params};
 
-  my $fixedModShorName=$sldb->fixModShortName($modShortName);
-  if(! defined $fixedModShorName) {
+  my $fixedModShortName=$sldb->fixModShortName($modShortName);
+  if(! defined $fixedModShortName) {
     my $p_allowedMods=$sldb->getModsShortNames();
     my $allowedModsString=join(',',@{$p_allowedMods});
     invalidSyntax($user,'skillgraph',"allowed games: $allowedModsString");
     return 0;
   }
-  $modShortName=$fixedModShorName;
+  $modShortName=$fixedModShortName;
 
   if(defined $accountString) {
     my $level=getUserAccessLevel($user);
@@ -2213,7 +2218,7 @@ sub hSplitAcc {
             return 0;
           }
           my $p_userAccounts=$sldb->getUserAccounts($userId);
-          if(! grep {/^$accountId$/} @{$p_userAccounts}) {
+          if(none {$accountId eq $_} @{$p_userAccounts}) {
             answer("Unable to split accounts, account ID $accountId is not linked to user ID $userId !");
             return 0;
           }
