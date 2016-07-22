@@ -2,6 +2,15 @@
 !adminEvents [<maxAge> [<typeFilter> [<subTypeFilter> [<origFilter> [<origIdFilter>]]]]] - lists recent admin events (default <maxAge> is 7d), with optional filters [alias: !ae]
 "!adminEvents 1y JOIN_ACC * 1" shows all admin events of type "JOIN_ACC" that occured over the past year, with any subType and orig=1
 
+[banList]
+!banList [<banListName> create|delete|add|remove [<userName>|#<userId>]] - lists and edit ban lists [alias: !bl]
+"!banList" lists all ban lists
+"!banList myList" lists the users banned by the ban list "myList"
+"!banList myList create" creates a new ban list named "myList"
+"!banList myList delete" deletes the ban list named "myList"
+"!banList myList add badUser" adds the user "badUser" in the ban list "myList"
+"!banList myList remove #5678" removes the user identified by the user ID "5678" from the ban list "myList"
+
 [checkIps]
 !checkIps <name>|#<accountId> - list known in-game IPs for the account identified uniquely by his name <name> or by his ID <accountId> [alias: !ips]
 
@@ -57,6 +66,12 @@
 !set <prefName> [<prefValue>] - configure a setting
 "!set ircColors 0" disables the use of IRC colors in bot output
 "!set ircColors" restores default value for setting "ircColors"
+
+[setBanList]
+!setBanList [<hostName>|#<hostAccountId> [<listName>]] - configures the ban list associated with a host [alias: !sbl]
+"!setBanList" lists all hosts configured to use SLDB ban system
+"!setBanList host1" disables SLDB ban system for the host named "host1"
+"!setBanList #7890 myList" configures the host identified by the accountId 7890 to use the ban list named "myList"
 
 [setName]
 !setName <oldName>|#<userId> <newName> - renames the user named <userName> or whose user ID is <userId> to <newName> [alias: !sn]

@@ -30,6 +30,7 @@ use POSIX (':sys_wait_h','ceil');
 
 use IO::Select;
 use List::Util 'first';
+use Storable qw'nstore retrieve';
 use Text::ParseWords;
 
 use SimpleLog;
@@ -73,6 +74,7 @@ my @ircStyle=(\%ircColors,'');
 my @noIrcStyle=(\%noColor,'');
 
 my %lobbyHandlers = ( adminevents => \&hAdminEvents,
+                      banlist => \&hBanList,
                       checkips => \&hCheckIps,
                       checkuserips => \&hCheckUserIps,
                       checkprobsmurfs => \&hCheckProbSmurfs,
@@ -89,6 +91,7 @@ my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       searchuser => \&hSearchUser,
                       sendlobby => \&hSendLobby,
                       set => \&hSet,
+                      setbanlist => \&hSetBanList,
                       setname => \&hSetName,
                       skillgraph => \&hSkillGraph,
                       splitacc => \&hSplitAcc,
@@ -181,6 +184,17 @@ if($conf{sldb} =~ /^([^\/]+)\/([^\@]+)\@((?i:dbi)\:\w+\:\w.*)$/) {
 if(! $sldb->connect()) {
   slog("Unable to connect to SLDB",1);
   exit;
+}
+
+my $p_smurfBans={};
+if(-f $conf{varDir}.'/smurfBans.dat') {
+  $p_smurfBans=retrieve($conf{varDir}.'/smurfBans.dat');
+  if(! defined $p_smurfBans) {
+    slog("Unable to load smurf bans",1);
+    exit;
+  }
+}else{
+  $p_smurfBans={lists => {}, hosts => {}};
 }
 
 # Subfunctions ################################################################
@@ -659,6 +673,7 @@ sub handleRequest {
   my $lcCmd=lc($cmd[0]);
 
   my %aliases=( ae => 'adminEvents',
+                bl => 'banList',
                 cps => 'checkProbSmurfs',
                 h => 'help',
                 ips => 'checkIps',
@@ -667,6 +682,7 @@ sub handleRequest {
                 ns => 'notSmurf',
                 r => 'ranking',
                 sa => 'splitAcc',
+                sbl => 'setBanList',
                 sg => 'skillGraph',
                 sn => 'setName',
                 su => 'searchUser',
@@ -853,6 +869,43 @@ sub initUserIrcColors {
   }
 }
 
+sub enforceUserBan {
+  my ($bannedUserId,$banList)=@_;
+  my $p_bannedIds=$sldb->getUserAccounts($bannedUserId);
+  foreach my $managedHostId (keys %{$p_smurfBans->{hosts}}) {
+    next unless($p_smurfBans->{hosts}->{$managedHostId} eq $banList
+                && exists $lobby->{accounts}->{$managedHostId}
+                && exists $hostBattles{$lobby->{accounts}->{$managedHostId}});
+    my $hostName=$lobby->{accounts}->{$managedHostId};
+    my $bId=$hostBattles{$hostName};
+    my %battleAccounts=map { $lobby->{users}->{$_}->{accountId} => $_ } @{$lobby->{battles}->{$bId}->{userList}};
+    my @kickBannedIds=grep {exists $battleAccounts{$_}} @{$p_bannedIds};
+    foreach my $kickBannedId (@kickBannedIds) {
+      sayPrivate($hostName,"!kickBan $battleAccounts{$kickBannedId}");
+    }
+  }
+}
+
+sub enforceHostBans {
+  my ($hostId,$accountName)=@_;
+  return unless(exists $p_smurfBans->{hosts}->{$hostId});
+  return unless(exists $lobby->{accounts}->{$hostId} && exists $hostBattles{$lobby->{accounts}->{$hostId}});
+  my $hostName=$lobby->{accounts}->{$hostId};
+  my $bId=$hostBattles{$hostName};
+  my %userIdsToCheck;
+  if(defined $accountName) {
+    return unless(any {$accountName eq $_} @{$lobby->{battles}->{$bId}->{userList}});
+    %userIdsToCheck=($sldb->getUserId($lobby->{users}->{$accountName}->{accountId}) => $accountName);
+  }else{
+    %userIdsToCheck=map { $sldb->getUserId($lobby->{users}->{$_}->{accountId}) => $_ } @{$lobby->{battles}->{$bId}->{userList}};
+  }
+  my $banList=$p_smurfBans->{hosts}->{$hostId};
+  my @kickBannedIds=grep {exists $p_smurfBans->{lists}->{$banList}->{$_}} (keys %userIdsToCheck);
+  foreach my $kickBannedId (@kickBannedIds) {
+    sayPrivate($hostName,"!kickBan $userIdsToCheck{$kickBannedId}");
+  }
+}
+
 # SldbLi commands handlers #####################################################
 
 sub hAdminEvents {
@@ -921,6 +974,115 @@ sub hAdminEvents {
   }else{
     answer("No matching admin event found.");
   }
+}
+
+sub hBanList {
+  my ($source,$user,$p_params)=@_;
+  my ($p_C,$B)=initUserIrcColors($user);
+  my %C=%{$p_C};
+  
+  if(! @{$p_params}) {
+    if(%{$p_smurfBans->{lists}}) {
+      my @banLists=sort keys %{$p_smurfBans->{lists}};
+      sayPrivate($user,"$B********** Available ban list".($#banLists>0?'s':'').' **********');
+      foreach my $banList (@banLists) {
+        my $nbUsers=keys %{$p_smurfBans->{lists}->{$banList}};
+        sayPrivate($user,"$C{3}$banList$C{1} ($nbUsers user".($nbUsers>1?'s)':')'));
+      }
+    }else{
+      answer('No ban list defined.');
+    }
+    return 1;
+  }
+
+  my ($banList,$action,$bannedUserId)=@{$p_params};
+  
+  if(defined $action && $action eq 'create') {
+    if(exists $p_smurfBans->{lists}->{$banList}) {
+      answer("Ban list \"$banList\" already exists!");
+      return 0;
+    }
+  }else{
+    if(! exists $p_smurfBans->{lists}->{$banList}) {
+      answer("Unknown ban list \"$banList\"!");
+      return 0;
+    }
+  }
+
+  if(! defined $action) {
+    my ($sth,@results,%bannedUsers);
+    foreach my $userId (keys %{$p_smurfBans->{lists}->{$banList}}) {
+      $sth=$sldb->prepExec("select name from userDetails where userId=$userId");
+      @results=$sth->fetchrow_array();
+      $bannedUsers{$results[0]}=$userId if(@results);
+    }
+    if(%bannedUsers) {
+      sayPrivate($user,"$B********** Banned user".(keys %bannedUsers>1?'s':'')." for ban list \"$banList\" **********");
+      foreach my $bannedUser (sort keys %bannedUsers) {
+        sayPrivate($user,"$C{3}$bannedUser$C{1} ($bannedUsers{$bannedUser})");
+      }
+    }else{
+      answer("Ban list \"$banList\" is empty.");
+    }
+    return 1;
+  }
+
+  if($action eq 'create') {
+    $p_smurfBans->{lists}->{$banList}={};
+    answer("Ban list \"$banList\" created.");
+    return 1;
+  }
+
+  if($action eq 'delete') {
+    foreach my $host (keys %{$p_smurfBans->{hosts}}) {
+      delete $p_smurfBans->{hosts}->{$host} if($p_smurfBans->{hosts}->{$host} eq $banList);
+    }
+    delete $p_smurfBans->{lists}->{$banList};
+    answer("Ban list \"$banList\" deleted.");
+    return 1;
+  }
+
+  if(! defined $bannedUserId) {
+    invalidSyntax($user,'banlist');
+    return 0;
+  }
+  if($bannedUserId =~ /^\#(\d+)$/) {
+    $bannedUserId=$1;
+  }else{
+    my $userId=$sldb->getUserIdByName($bannedUserId);
+    if(defined $userId) {
+      $bannedUserId=$userId;
+    }else{
+      answer("User \"$bannedUserId\" is unknown");
+      return 0;
+    }
+  }
+  if($action eq 'add') {
+    $bannedUserId=$sldb->getUserId($bannedUserId);
+    if(! defined $bannedUserId) {
+      answer("Unable to add user to ban list, unknown user!");
+      return 0;
+    }
+    if(exists $p_smurfBans->{lists}->{$banList}->{$bannedUserId}) {
+      answer("User \#$bannedUserId is already included in ban list \"$banList\"");
+      return 0;
+    }
+    $p_smurfBans->{lists}->{$banList}->{$bannedUserId}=$user;
+    answer("User \#$bannedUserId added to ban list $banList");
+    enforceUserBan($bannedUserId,$banList);
+    return 1;
+  }
+  if($action eq 'remove') {
+    if(exists $p_smurfBans->{lists}->{$banList}->{$bannedUserId}) {
+      delete $p_smurfBans->{lists}->{$banList}->{$bannedUserId};
+      answer("User \#$bannedUserId removed from ban list $banList");
+      return 1;
+    }
+    answer("User \#$bannedUserId is not included in ban list \"$banList\"");
+    return 0;
+  }
+  invalidSyntax($user,'banlist');
+  return 0;
 }
 
 sub hCheckProbSmurfs {
@@ -1963,6 +2125,80 @@ sub hSet {
   }
 }
 
+sub hSetBanList {
+  my ($source,$user,$p_params)=@_;
+
+  my ($p_C,$B)=initUserIrcColors($user);
+  my %C=%{$p_C};
+  
+  if(! @{$p_params}) {
+    if(%{$p_smurfBans->{hosts}}) {
+      my %hostsByName;
+      foreach my $hostId (keys %{$p_smurfBans->{hosts}}) {
+        my $sth=$sldb->prepExec("select name from names where accountId=$hostId order by lastConnection desc limit 1");
+        my @nameResult=$sth->fetchrow_array();
+        $hostsByName{$nameResult[0]}=$hostId if(@nameResult);
+      }
+      my @hosts=sort keys %hostsByName;
+      sayPrivate($user,"$B********** Host".($#hosts>0?'s':'').' using SLDB ban lists **********');
+      foreach my $hostName (@hosts) {
+        sayPrivate($user,"$C{3}$hostName$C{1} (ID \#$hostsByName{$hostName}): $p_smurfBans->{hosts}->{$hostsByName{$hostName}}");
+      }
+    }else{
+      answer('No host using SLDB ban list.');
+    }
+    return 1;
+  }
+
+  my ($host,$banList)=@{$p_params};
+  my $hostId;
+  if($host =~ /^\#(\d+)$/) {
+    $hostId=$1;
+  }else{
+    $hostId=$sldb->identifyUniqueAccountByString($host);
+    if(! defined $hostId) {
+      answer("Unable to identify any account matching \"$host\" !");
+    }elsif($hostId == -1) {
+      answer("Multiple account names match \"$host\", use more specific string or use account ID instead.");
+    }elsif($hostId == -2) {
+      answer("Multiple user names contain \"$host\", use more specific string or use account ID instead.");
+    }elsif($hostId == -3) {
+      answer("Multiple account names contain \"$host\", use more specific string or use account ID instead.");
+    }
+    return 0 unless(defined $hostId && $hostId > 0);
+  }
+  if(defined $banList) {
+    if(! exists $p_smurfBans->{lists}->{$banList}) {
+      answer("Unknown ban list \"$banList\"!");
+      return 0;
+    }
+    if($sldb->getIdType($hostId) eq 'unknown') {
+      answer("Unknown ID $hostId !");
+      return 0;
+    }
+    if(exists $p_smurfBans->{hosts}->{$hostId}) {
+      if($p_smurfBans->{hosts}->{$hostId} eq $banList) {
+        answer("Ban list for host \#$hostId is already set to $banList !");
+        return 0;
+      }
+      answer("Changed ban list for host \#$hostId from $p_smurfBans->{hosts}->{$hostId} to $banList.");
+    }else{
+      answer("Ban list for host \#$hostId set to $banList.");
+    }
+    $p_smurfBans->{hosts}->{$hostId}=$banList;
+    enforceHostBans($hostId);
+    return 1;
+  }else{
+    if(exists $p_smurfBans->{hosts}->{$hostId}) {
+      delete $p_smurfBans->{hosts}->{$hostId};
+      answer("SLDB ban disabled for host \#$hostId");
+      return 1;
+    }
+    answer("SLDB ban is already disabled for host \#$hostId !");
+    return 0;
+  }
+}
+
 sub hSetName {
   my ($source,$user,$p_params)=@_;
   if($#{$p_params} != 1) {
@@ -2756,6 +2992,7 @@ sub cbLobbyConnect {
                         BROADCAST => \&cbBroadcast,
                         JOINED => \&cbJoined,
                         LEFT => \&cbLeft,
+                        JOINEDBATTLE => \&cbJoinedBattle,
                         LEFTBATTLE => \&cbLeftBattle,
                         BATTLEOPENED => \&cbBattleOpened,
                         BATTLECLOSED => \&cbBattleClosed,
@@ -2899,6 +3136,11 @@ sub cbLeft {
   my $reasonString ="";
   $reasonString=" ($reason)" if(defined $reason && $reason ne "");
   logMsg("channel_$chan","=== $user left$reasonString ===") if($conf{logChanJoinLeave});
+}
+
+sub cbJoinedBattle {
+  my (undef,$bId,$user)=@_;
+  enforceHostBans($lobby->{users}->{$battleHosts{$bId}}->{accountId},$user);
 }
 
 sub cbLeftBattle {
@@ -3069,6 +3311,7 @@ if($lobbyState) {
   }
   $lobby->disconnect();
 }
+slog('Unable to store smurf bans',1) unless(nstore($p_smurfBans,$conf{varDir}.'/smurfBans.dat'));
 if($quitScheduled == 2) {
   exec($0,$confFile) || forkedError("Unable to restart SldbLi",0);
 }
