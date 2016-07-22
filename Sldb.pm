@@ -22,6 +22,7 @@ package Sldb;
 use strict;
 
 use DBI;
+use Time::HiRes;
 
 use SimpleLog;
 
@@ -1123,11 +1124,17 @@ sub getSkills {
     }
   }
 
+  my $getSkillErrors=0;
   my %skills;
   foreach my $gameType (keys %gameTypeMapping) {
     my $gType=$gameTypeMapping{$gameType};
     $sth=$self->prepExec("select mu,sigma from ts${gType}Players where period=$period and modShortName=$quotedModShortName and userId=$userId");
     @foundData=$sth->fetchrow_array();
+    if(! @foundData && $getSkillErrors < 10) {
+      $getSkillErrors++;
+      Time::HiRes::usleep(50000);
+      redo;
+    }
     $skills{$gameType}={mu => $foundData[0], sigma => $foundData[1]};
     if($gameType eq 'TeamFFA' && $foundData[1] > 25/6) {
       my $teamFfaCorrectionFactor=($foundData[1]-25/6)/(25/3);
@@ -1140,6 +1147,8 @@ sub getSkills {
       $skills{TeamFFA}->{mu}=$teamFfaCorrectionFactor*$foundData[0]+(1-$teamFfaCorrectionFactor)*$skills{TeamFFA}->{mu};
     }
   }
+
+  $self->log("Encountered $getSkillErrors lookup failure".($getSkillErrors>1?'s':'')." while fetching skills for $userId (concurrent rerate in progress?)",2) if($getSkillErrors);
 
   return \%skills;
 }
