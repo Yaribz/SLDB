@@ -38,6 +38,8 @@ use Sldb;
 use SldbLiConf;
 
 use SpringLobbyInterface;
+eval "use IpWhois";
+my $ipWhoisModuleUnavailable=$@;
 
 sub any (&@) { my $c = shift; return defined first {&$c} @_; }
 sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
@@ -99,6 +101,7 @@ my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       uwhois => \&hUWhois,
                       version => \&hVersion,
                       whois => \&hWhois );
+$lobbyHandlers{ipwhois}=\&hIpWhois unless($ipWhoisModuleUnavailable);
 
 # Basic checks ################################################################
 
@@ -127,6 +130,7 @@ $masterChannel=$1 if($masterChannel =~ /^([^\s]+)\s/);
 
 my %conf=%{$botConf->{conf}};
 $sLog=$botConf->{log};
+slog("IpWhois module unavailable, !ipWhois command is disabled",2) if($ipWhoisModuleUnavailable);
 my $lSock;
 my @sockets=();
 my $running=1;
@@ -195,6 +199,16 @@ if(-f $conf{varDir}.'/smurfBans.dat') {
   }
 }else{
   $p_smurfBans={lists => {}, hosts => {}};
+}
+
+my $whois;
+if(! $ipWhoisModuleUnavailable) {
+  my $ipWhoisSimpleLog=SimpleLog->new(logFiles => [$conf{logDir}."/sldbLi.log",''],
+                                      logLevels => [4,2],
+                                      useANSICodes => [0,1],
+                                      useTimestamps => [1,1],
+                                      prefix => "[IpWhois] ");
+  $whois=IpWhois->new(asrCacheDownloadTimeout => 5, whoisConnectTimeout => 5, whoisResponseTimeout => 5, sLog => $ipWhoisSimpleLog);
 }
 
 # Subfunctions ################################################################
@@ -690,6 +704,7 @@ sub handleRequest {
                 uips => 'checkUserIps',
                 uw => 'uwhois',
                 w => 'whois' );
+  $aliases{iw}='ipWhois' unless($ipWhoisModuleUnavailable);
   if(exists $aliases{$lcCmd}) {
     $lcCmd=lc($aliases{$lcCmd});
     $cmd[0]=$lcCmd;
@@ -1409,6 +1424,86 @@ sub hHelpAll {
     $helpLine="$C{3}$1$C{5}$2$C{1}$3" if($helpLine =~ /^(!\w+)(.*)( - .*)$/);
     sayPrivate($user,$helpLine);
   }
+}
+
+sub hIpWhois {
+  my ($source,$user,$p_params)=@_;
+  if($#{$p_params} < 0 || $#{$p_params} > 1) {
+    invalidSyntax($user,'ipwhois');
+    return 0;
+  }
+  my ($doWhois,$doReverseDns)=(1,1);
+  if($#{$p_params} == 1) {
+    my $mode=shift(@{$p_params});
+    if($mode eq '-n') {
+      $doReverseDns=0;
+    }elsif($mode eq '-h') {
+      $doWhois=0;
+    }else{
+      invalidSyntax($user,'ipwhois');
+      return 0;
+    }
+  }
+  my $ip=$p_params->[0];
+  unless($ip =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/ && (all {$_ >= 0 && $_ < 256} ($1,$2,$3,$4))) {
+    invalidSyntax($user,'ipwhois',"invalid IP address \"$ip\"");
+    return 0;
+  }
+
+  my ($p_C,$B)=initUserIrcColors($user);
+  my %C=%{$p_C};
+    
+  if($doWhois) {
+    my $p_whoisData=$whois->queryIp($ip);
+    if(! defined $p_whoisData || ! @{$p_whoisData}) {
+      answer("Unable to find any network data concerning IP \"$ip\"");
+    }else{
+    
+      my $needSpacing=0;
+      foreach my $p_netData (@{$p_whoisData}) {
+        if($#{$p_netData->{description}} > 0) {
+          $needSpacing=1;
+          last;
+        }
+      }
+      
+      my @networksData;
+      foreach my $p_netData (@{$p_whoisData}) {
+        push(@networksData,{}) if($needSpacing && @networksData);
+        push(@networksData,{"$C{5}Range" => $p_netData->{range},
+                            Name => $p_netData->{name},
+                            Country => $p_netData->{country},
+                            Status => $p_netData->{status},
+                            Description => shift @{$p_netData->{description}}});
+        while(@{$p_netData->{description}}) {
+          push(@networksData,{Description => shift @{$p_netData->{description}}});
+        }
+      }
+      my $p_resultLines=formatArray(["$C{5}Range",'Name','Country','Status','Description'],\@networksData,"$C{2}Network information for $ip$C{1}");
+      sayPrivate($user,'.');
+      foreach my $resultLine (@{$p_resultLines}) {
+        sayPrivate($user,$resultLine);
+      }
+    }
+  }
+
+  if($doReverseDns) {
+    my ($status,$hostname)=$whois->forwardConfirmedReverseDns($ip);
+    my %statusMsg=(0 => "$C{3}forward confirmed$C{1}",
+                   1 => "invalid IP",
+                   2 => "unresolvable IP",
+                   3 => "$C{4}unresolvable host$C{1}",
+                   4 => "$C{13}spoofed host$C{1}",
+                   5 => "$C{13}invalid host$C{1}");
+    my @nonResolvableStatus=(1,2);
+    if(any {$status == $_} @nonResolvableStatus) {
+      sayPrivate($user,"Unable to perform reverse DNS lookup on IP $ip ($statusMsg{$status})");
+    }else{
+      sayPrivate($user,"$C{2}$ip$C{1} resolved to $C{12}$hostname$C{1} ($statusMsg{$status})");
+    }
+  }
+
+  return 1;
 }
 
 sub hJoinAcc {

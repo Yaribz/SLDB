@@ -28,6 +28,12 @@
 [helpall]
 !helpall - lists all commands
 
+[ipWhois]
+!ipWhois [-h|-n] <ipAddress> - performs hostname (-h) and/or network whois (-n) lookup on <ipAddress> [alias: !iw]
+"!ipWhois 1.2.3.4" performs both hostname and network whois lookups on IP address "1.2.3.4"
+"!ipWhois -h 1.2.3.4" performs only hostname lookup on IP address "1.2.3.4"
+"!ipWhois -n 1.2.3.4" performs only network whois lookup on IP Address "1.2.3.4"
+
 [joinAcc]
 !joinAcc [-f] [-s] [-t] <userName1>|#<userId1> <userName2>|#<userId2> - joins the two users (order has no importance), "-f" = force, "-s" = sticky, "-t" = test [alias: !ja]
 "!joinAcc joe joe_" joins the users with exact user names "joe" and "joe_" if they were not explicitly marked as "not-smurf"
