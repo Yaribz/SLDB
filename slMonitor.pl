@@ -1348,15 +1348,7 @@ sub handleCommand {
                   data => ''};
   }elsif($command eq '#endGDR') {
     if(exists $GDRs{$user}) {
-      if($GDRs{$user}->{data}=~/</) { # Backward compatibility with SPADS < 0.11.22
-        $GDRs{$user}->{data}=~s/<NL>/\n/g; # Backward compatibility with SPADS < 0.11.11
-        $GDRs{$user}->{data}=~s/<CM>//g; # Backward compatibility with SPADS < 0.11.11
-        $GDRs{$user}->{data}=~s/<LF>/\cJ/g;
-        $GDRs{$user}->{data}=~s/<CR>/\cM/g;
-        $GDRs{$user}->{data}=~s/<EX>/\!/g;
-      }else{
-        $GDRs{$user}->{data}=decode_base64($GDRs{$user}->{data});
-      }
+      $GDRs{$user}->{data}=decode_base64($GDRs{$user}->{data});
       my $p_gdr=eval { thaw($GDRs{$user}->{data}) };
       if($@) {
         slog("Unable to read GDR received from \"$user\"!",2);
