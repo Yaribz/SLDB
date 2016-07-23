@@ -1280,6 +1280,8 @@ sub isValidGDR {
       $hasUndecidedWinValues=1;
     }
   }
+  my %botNames;
+  my %newBotNames;
   foreach my $p_bot (@{$p_gdr->{bots}}) {
     foreach my $field (qw/accountId name ai team allyTeam win/) {
       if(! exists $p_bot->{$field} || ! defined $p_bot->{$field}) {
@@ -1287,6 +1289,24 @@ sub isValidGDR {
         return 0;
       }
     }
+    if(exists $botNames{$p_bot->{name}}) {
+      slog("Duplicate bot name found in GDR (\"$p_bot->{name}\")",2);
+      return 0;
+    }
+    $botNames{$p_bot->{name}}=1;
+    if(length $p_bot->{name} > 20) {
+      slog("Bot name too long found in GDR (\"$p_bot->{name}\"), truncating...",2);
+      $p_bot->{name}=substr($p_bot->{name},0,20);
+    }
+    if(exists $newBotNames{$p_bot->{name}}) {
+      my ($newName,$i)=($p_bot->{name},0);
+      while(exists $newBotNames{$newName}) {
+        $newName=substr($p_bot->{name},0,(20-length($i))).$i;
+        $i++;
+      }
+      $p_bot->{name}=$newName;
+    }
+    $newBotNames{$p_bot->{name}}=1;
     if($p_bot->{accountId} !~ /^\d+$/) {
       slog("Invalid accountId value in bot entry in GDR ($p_bot->{accountId})!",2);
       return 0;
