@@ -171,7 +171,8 @@ my $lobbySimpleLog=SimpleLog->new(logFiles => [$conf{logDir}."/sldbLi.log",''],
 my $lobby = SpringLobbyInterface->new(serverHost => $conf{lobbyHost},
                                       serverPort => $conf{lobbyPort},
                                       simpleLog => $lobbySimpleLog,
-                                      warnForUnhandledMessages => 0);
+                                      warnForUnhandledMessages => 0,
+                                      inconsistencyHandler => sub { $lobbyBrokenConnection=1; } );
 my $sldb;
 my ($sldbLogin,$sldbPasswd,$sldbDs);
 if($conf{sldb} =~ /^([^\/]+)\/([^\@]+)\@((?i:dbi)\:\w+\:\w.*)$/) {
