@@ -476,6 +476,7 @@ create table if not exists gamesNames (
   name varchar(64) primary key,
   shortName char(8),
   regex varchar(64),
+  testRegex varchar(64),
   chickenRegex varchar(64),
   index(shortName)
 ) engine=MyISAM','create table "gamesNames"');
@@ -783,7 +784,7 @@ sub getModNameFromShortName {
 sub getModShortName {
   my ($self,$mod)=@_;
   my $quotedMod=$self->quote($mod);
-  my $sth=$self->prepExec("select shortName from gamesNames where $quotedMod regexp regex");
+  my $sth=$self->prepExec("select shortName from gamesNames where $quotedMod regexp regex or $quotedMod regexp testRegex");
   my @found=$sth->fetchrow_array();
   return $found[0] if(@found);
   return undef;
