@@ -21,7 +21,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.1 (2013/11/27)
+# Version 0.2 (2018/11/29)
 
 use strict;
 
@@ -903,16 +903,14 @@ sub rateMonth {
 sub rateModFromMonth {
   my ($startYear,$startMonth,$modShortName)=@_;
   slog("Rating game $modShortName from month $startYear-$startMonth...",3);
-  my $currentYear=currentYear();
-  my $currentMonth=currentMonth();
-  for my $rateYear ($startYear..$currentYear) {
+  for my $rateYear ($startYear..$currentRatingYear) {
     my $firstMonth=1;
     $firstMonth=$startMonth if($rateYear == $startYear);
     my $lastMonth=12;
-    $lastMonth=$currentMonth if($rateYear == $currentYear);
+    $lastMonth=$currentRatingMonth if($rateYear == $currentRatingYear);
     for my $rateMonth ($firstMonth..$lastMonth) {
       rateMonth($rateYear,$rateMonth,$modShortName);
-      applyMonthPenalties($rateYear,$rateMonth,$modShortName) unless($rateYear == $currentYear && $rateMonth == $currentMonth);
+      applyMonthPenalties($rateYear,$rateMonth,$modShortName) unless($rateYear == $currentRatingYear && $rateMonth == $currentRatingMonth);
     }
   }
 }
@@ -922,6 +920,8 @@ my $p_ratingState=$sldb->getRatingState();
 if(! exists $p_ratingState->{currentRatingMonth}) {  
   slog("Start of batch rating (ratings initialization)",3);
   $sldb->do("insert into tsRatingState values('batchRatingStatus',1) on duplicate key update value=1",'update batchRatingStatus parameter to 1 in tsRatingState table');
+  $currentRatingYear=currentYear();
+  $currentRatingMonth=currentMonth();
   my $p_allMods=$sldb->getModsShortNames();
   foreach my $modShortName (@{$p_allMods}) {
     my $quotedModShortName=$sldb->quote($modShortName);
@@ -929,8 +929,6 @@ if(! exists $p_ratingState->{currentRatingMonth}) {
     my @dataFound=$sth->fetchrow_array();
     rateModFromMonth($dataFound[0],$dataFound[1],$modShortName) if(@dataFound);
   }
-  $currentRatingYear=currentYear();
-  $currentRatingMonth=currentMonth();
   $sldb->do("insert into tsRatingState values('currentRatingYear',$currentRatingYear)","initialize currentRatingYear parameter to $currentRatingYear in tsRatingState table");
   $sldb->do("insert into tsRatingState values('currentRatingMonth',$currentRatingMonth)","initialize currentRatingMonth parameter to $currentRatingMonth in tsRatingState table");
   $sldb->do("update tsRatingState set value=0 where param='batchRatingStatus'",'update batchRatingStatus parameter to 0 in tsRatingState table');
