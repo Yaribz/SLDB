@@ -26,7 +26,7 @@ use Time::HiRes;
 
 use SimpleLog;
 
-my $moduleVersion='0.1';
+my $moduleVersion='0.2';
 
 my %ADMIN_EVT_TYPE=('UPD_USERDETAILS' => 0,
                     'JOIN_ACC' => 1,
@@ -236,7 +236,7 @@ create table if not exists cpus (
   $self->do('
 create table if not exists hardwareIds (
   accountId int unsigned,
-  hardwareId int,
+  hardwareId int unsigned,
   lastConnection timestamp,
   primary key (accountId,hardwareId),
   index (lastConnection)
@@ -529,7 +529,7 @@ $partitionDefs","create partitioned table \"ts${gameType}Players\"");
   $self->do('
 create table if not exists tsRatingQueue (
   gameId char(32) primary key,
-  gdrTimestamp timestamp,
+  gdrTimestamp timestamp default 0,
   status tinyint(1),
   index(gdrTimestamp)
 ) engine=MyISAM','create table "tsRatingQueue"');
@@ -1491,9 +1491,10 @@ sub deleteAccountsSmurfState {
 
 # Called by sldbLi.pl
 sub getSimultaneousUserGames {
-  my ($self,$userId1,$userId2)=@_;
+  my ($self,$userId1,$userId2,$maxGames)=@_;
+  $maxGames//=10;
   my @simultaneousGames;
-  my $sth=$self->prepExec("select pd1.gameId,pd1.accountId,pd2.accountId from playersDetails pd1,playersDetails pd2,userAccounts ua1, userAccounts ua2, games g where ua1.userId=$userId1 and ua2.userId=$userId2 and ua1.accountId=pd1.accountId and ua2.accountId=pd2.accountId and pd1.gameId=pd2.gameId and pd1.gameId=g.gameId and pd1.team is not null and pd1.ip is not null and pd1.ip != 0 and pd2.team is not null and pd2.ip is not null and pd2.ip != 0 order by g.endTimestamp desc limit 10","check if users $userId1 and $userId2 have already played in same game in playersDetails table");
+  my $sth=$self->prepExec("select pd1.gameId,pd1.accountId,pd2.accountId from playersDetails pd1,playersDetails pd2,userAccounts ua1, userAccounts ua2, games g where ua1.userId=$userId1 and ua2.userId=$userId2 and ua1.accountId=pd1.accountId and ua2.accountId=pd2.accountId and pd1.gameId=pd2.gameId and pd1.gameId=g.gameId and pd1.team is not null and pd1.ip is not null and pd1.ip != 0 and pd2.team is not null and pd2.ip is not null and pd2.ip != 0 order by g.endTimestamp desc limit $maxGames","check if users $userId1 and $userId2 have already played in same game in playersDetails table");
   my @foundData;
   while(@foundData=$sth->fetchrow_array()) {
     push(@simultaneousGames,{gameId => $foundData[0], id1 => $foundData[1], id2 => $foundData[2]});
