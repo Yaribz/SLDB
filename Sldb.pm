@@ -1,7 +1,7 @@
 # Perl module implementing the SLDB data model.
 # This file is part of SLDB.
 #
-# Copyright (C) 2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -225,15 +225,6 @@ create table if not exists countries (
 ) engine=MyISAM','create table "countries"');
 
   $self->do('
-create table if not exists cpus (
-  accountId int unsigned,
-  cpu int unsigned,
-  lastConnection timestamp,
-  primary key (accountId,cpu),
-  index (lastConnection)
-) engine=MyISAM','create table "cpus"');
-
-  $self->do('
 create table if not exists hardwareIds (
   accountId int unsigned,
   hardwareId int unsigned,
@@ -241,6 +232,15 @@ create table if not exists hardwareIds (
   primary key (accountId,hardwareId),
   index (lastConnection)
 ) engine=MyISAM','create table "hardwareIds"');
+
+  $self->do('
+create table if not exists systemIds (
+  accountId int unsigned,
+  systemId bigint unsigned,
+  lastConnection timestamp,
+  primary key (accountId,systemId),
+  index (lastConnection)
+) engine=MyISAM','create table "systemIds"');
 
   $self->do('
 create table if not exists games (
@@ -453,15 +453,14 @@ create table if not exists rtPlayers (
   access tinyint(1),
   bot tinyint(1),
   country char(2),
-  cpu mediumint unsigned,
+  lobbyClient varchar(64),
   rank tinyint(1),
   inGame tinyint(1),
   gameTimestamp timestamp default 0,
   away tinyint(1),
   awayTimestamp  timestamp default 0,
   index(name),
-  index(country),
-  index(cpu)
+  index(country)
 ) engine=MyISAM','create table "rtPlayers"');
 
   $self->do('
@@ -1567,19 +1566,6 @@ sub getProbableSmurfs {
 }
 
 # Called by getUserOrderedSmurfGroups()
-sub getLatestAccountCpu {
-  my ($self,$accId)=@_;
-  my $sth=$self->prepExec("select cpu from cpus where accountId=$accId and lastConnection in (select max(lastConnection) from cpus where accountId=$accId)","read cpus table to get latest cpu for account \"$accId\""); 
-  my @foundData=$sth->fetchrow_array();
-  if(! @foundData) {
-    $self->log("Unable to find latest cpu for account \"$accId\"",2);
-    return 0;
-  }else{
-    return $foundData[0];
-  }
-}
-
-# Called by getUserOrderedSmurfGroups()
 sub getTrueSmurfsByIP {
   my ($self,$p_trueSmurfs,$p_accountsToTest,$currentLevel)=@_;
 
@@ -1759,21 +1745,7 @@ sub getUserOrderedSmurfGroups {
         }
       }
       my @biggestGroups=@{$groupNbsBySize{$maxGroupSize}};
-      if($#biggestGroups == 0) {
-        $firstGroup=$biggestGroups[0];
-      }else{
-        my $userCpu=$self->getLatestAccountCpu($userId);
-        my ($bestGroup,$bestGroupAvgDeviation);
-        for my $i (0..$#biggestGroups) {
-          my $groupDeviation=0;
-          foreach my $id (@{$groupsByNb{$biggestGroups[$i]}}) {
-            $groupDeviation+=abs($self->getLatestAccountCpu($id)-$userCpu);
-          }
-          my $groupAvgDeviation=$groupDeviation/$maxGroupSize;
-          ($bestGroup,$bestGroupAvgDeviation)=($biggestGroups[$i],$groupAvgDeviation) unless(defined $bestGroupAvgDeviation && $bestGroupAvgDeviation < $groupAvgDeviation);
-        }
-        $firstGroup=$bestGroup;
-      }
+      $firstGroup=$biggestGroups[0];
     }
   }
 

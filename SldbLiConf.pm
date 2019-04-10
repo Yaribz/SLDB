@@ -1,7 +1,7 @@
 # sldbLi configuration module
 # This file is part of SLDB.
 #
-# Copyright (C) 2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@ use SimpleLog;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.1';
+my $moduleVersion='0.2';
 
 my %globalParameters = (lobbyLogin => ["login"],
                         lobbyPassword => ["password"],
@@ -80,7 +80,7 @@ my %paramTypes = (login => '[\w\[\]]{2,20}',
                   float => '\d+(\.\d*)?',
                   db => '[^\/]+\/[^\@]+\@(?i:dbi)\:\w+\:\w.*');
 
-my @usersFields=(["accountId","name","country","cpu","rank","access","bot","auth"],["level"]);
+my @usersFields=(["accountId","name","country","rank","access","bot","auth"],["level"]);
 my @levelsFields=(["level"],["description"]);
 my @commandsFields=(["source","status","gameState"],["directLevel","voteLevel"]);
 
@@ -425,7 +425,6 @@ sub getUserAccessLevel {
   my $p_userData={name => $name,
                   accountId => $p_user->{accountId},
                   country => $p_user->{country},
-                  cpu => $p_user->{cpu},
                   rank => $p_user->{status}->{rank},
                   access => $p_user->{status}->{access},
                   bot => $p_user->{status}->{bot},

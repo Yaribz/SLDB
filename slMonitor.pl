@@ -7,7 +7,7 @@
 # - monitor and store all lobby data (users, battles...) into SLDB in realtime
 # - receive, check, and store game data reports (GDR) sent by SPADS into SLDB
 #
-# Copyright (C) 2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,8 +22,6 @@
 # You should have received a copy of the GNU General Public License
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
-
-# Version 0.1 (2016/07/22)
 
 use strict;
 
@@ -40,6 +38,8 @@ require SimpleConf;
 require SimpleLog;
 require Sldb;
 require SpringLobbyInterface;
+
+my $slMonVer='0.2';
 
 my $confFile=catfile($scriptDir,'etc',"$scriptBaseName.conf");
 $confFile=$ARGV[0] if($#ARGV == 0);
@@ -153,6 +153,7 @@ my %monitoredBattles;
 my %monitoredGames;
 my %GDRs;
 my $lSock;
+my %newUsers;
 
 my $sldb=Sldb->new({dbDs => $dbDs,
                     dbLogin => $conf{dbLogin},
@@ -187,7 +188,7 @@ sub cbLobbyConnect {
                         SERVERMSG => \&cbServerMsg,
                         BROADCAST => \&cbBroadcast});
 
-  $lobby->sendCommand(['LOGIN',$conf{lobbyLogin},$lobby->marshallPasswd($conf{lobbyPassword}),0,'*','SpringLobbyMonitor v0.1',0,'a b sp cl'],
+  $lobby->sendCommand(['LOGIN',$conf{lobbyLogin},$lobby->marshallPasswd($conf{lobbyPassword}),0,'*',"SpringLobbyMonitor v$slMonVer",0,'l t sp cl'],
                       {ACCEPTED => \&cbLoginAccepted,
                        DENIED => \&cbLoginDenied,
                        AGREEMENTEND => \&cbAgreementEnd},
@@ -240,15 +241,16 @@ sub cbLoginInfoEnd {
 }
 
 sub cbAddUser {
-  my (undef,$user,$country,$cpu,$id)=@_;
+  my (undef,$user,$country,$id,$lobbyClient)=@_;
   return if($user eq 'ChanServ');
+  $newUsers{$user}=1;
   if(! defined $country) {
     slog("Received an invalid ADDUSER command from server (country field not provided for user $user)",2);
     $country='??';
   }
-  if(! defined $cpu || $cpu !~ /^\d+$/) {
-    slog("Received an invalid ADDUSER command from server (cpu field not provided or invalid for user $user)",2);
-    $cpu=0;
+  if(! defined $lobbyClient) {
+    slog("Received an invalid ADDUSER command from server (lobbyClient field not provided for user $user)",2);
+    $lobbyClient='';
   }
   if(! defined $id || ! $id || $id !~ /^\d+$/) {
     slog("Received an invalid ADDUSER command from server (accountId field not provided or invalid for user $user)",1);
@@ -257,11 +259,10 @@ sub cbAddUser {
   seenUser($user,$id);
   $lobby->sendCommand(['GETUSERID',$user]);
   $lobby->sendCommand(['GETIP',$user]);
-  ($user,$country)=$sldb->quote($user,$country);
+  ($user,$country,$lobbyClient)=$sldb->quote($user,$country,$lobbyClient);
   $sldb->do("insert into names values ($id,$user,now()) on duplicate key update lastConnection=now()","insert or update names table for account \"$id\" and name \"$user\"");
   $sldb->do("insert into countries values ($id,$country,now()) on duplicate key update lastConnection=now()","insert or update countries table for account \"$id\" and country \"$country\"");
-  $sldb->do("insert into cpus values ($id,$cpu,now()) on duplicate key update lastConnection=now()","insert or update cpus table for account \"$id\" and cpu \"$cpu\"");
-  $sldb->do("insert into rtPlayers values ($id,$user,0,0,$country,$cpu,0,0,0,0,0)","insert data in rtPlayers on addUser ($user)",\&nonFatalError);
+  $sldb->do("insert into rtPlayers values ($id,$user,0,0,$country,$lobbyClient,0,0,0,0,0)","insert data in rtPlayers on addUser ($user)",\&nonFatalError);
 }
 
 sub cbPreRemoveUser {
@@ -378,6 +379,7 @@ sub cbPreClientStatus {
 
 sub cbClientStatus {
   my (undef,$user)=@_;
+  delete $newUsers{$user};
   if(! exists $lobby->{users}->{$user}) {
     slog("Ignoring invalid CLIENTSTATUS command (unknown user \"$user\")",2);
     return;
@@ -496,12 +498,23 @@ sub cbSaidPrivate {
 sub cbServerMsg {
   my (undef,$msg)=@_;
   slog("SERVER MESSAGE: $msg",5);
-  if($msg =~ /^The ID for <([^>]+)> is (\-?\d+)/) {
-    my ($user,$hardwareId)=($1,$2);
+  if($msg =~ /^The ID for <([^>]+)> is (.+)$/) {
+    my ($user,$idsString)=($1,$2);
+    my @ids=split(/ /,$idsString);
+    if($ids[0] !~ /^\d+$/) {
+      slog("Ignoring invalid hardwareId \"$ids[0]\" received for user \"$user\"",2);
+      $ids[0]=undef;
+    }
+    if(defined $ids[1] && $ids[1] !~ /^[0-9a-f]{,16}$/) {
+      slog("Ignoring invalid systemId \"$ids[1]\" received for user \"$user\"",2);
+      $ids[1]=undef;
+    }
     if(exists $lobby->{users}->{$user}) {
-      seenHardwareId($lobby->{users}->{$user}->{accountId},$hardwareId);
+      my $userId=$lobby->{users}{$user}{accountId};
+      seenHardwareId($userId,$ids[0]) if(defined $ids[0]);
+      seenSystemId($userId,$ids[1]) if(defined $ids[1]);
     }else{
-      slog("Ignoring hardwareId \"$hardwareId\" received for offline user \"$user\"",4);
+      slog("Ignoring ids received for offline user \"$user\"",4);
     }
   }elsif($msg =~ /^<([^>]+)> is currently bound to (\d+\.\d+\.\d+\.\d+)/) {
     seenLobbyIp($1,$2);
@@ -601,9 +614,15 @@ sub seenHardwareId {
   $sldb->computeAllUserIps($userId,$conf{dynIpThreshold},$conf{dynIpRange});
 }
 
+sub seenSystemId {
+  my ($accountId,$systemId)=@_;
+  $sldb->do("insert into systemIds values ($accountId,conv('$systemId',16,10),now()) on duplicate key update lastConnection=now()","insert or update systemIds table for account \"$accountId\" and systemId \"$systemId\"");
+}
+
 sub seenLobbyIp {
   my ($user,$ip)=@_;
   return unless(exists $lobby->{users}->{$user});
+  cbClientStatus(undef,$user) if(exists $newUsers{$user});
   my $id=$lobby->{users}->{$user}->{accountId};
 
   my $ipNb;

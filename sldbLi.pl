@@ -8,7 +8,7 @@
 # - offer basic ranking data to players and advanced ranking data to SLDB admins
 # - allow SLDB admins to manage SLDB user data manually
 #
-# Copyright (C) 2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -46,7 +46,7 @@ sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
 sub none (&@) { my $c = shift; return ! defined first {&$c} @_; }
 sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
-my $sldbLiVer='0.1';
+my $sldbLiVer='0.2';
 
 $SIG{CHLD} = \&sigChldHandler;
 $SIG{TERM} = \&sigTermHandler;
@@ -472,32 +472,6 @@ sub formatInteger {
     $n.='K.';
   }
   return $n;
-}
-
-sub getCpuSpeed {
-  if(-f "/proc/cpuinfo" && -r "/proc/cpuinfo") {
-    my @cpuInfo=`cat /proc/cpuinfo 2>/dev/null`;
-    my %cpu;
-    foreach my $line (@cpuInfo) {
-      if($line =~ /^([\w\s]*\w)\s*:\s*(.*)$/) {
-        $cpu{$1}=$2;
-      }
-    }
-    if(defined $cpu{"model name"} && $cpu{"model name"} =~ /(\d+)\+/) {
-      return $1;
-    }
-    if(defined $cpu{"cpu MHz"} && $cpu{"cpu MHz"} =~ /^(\d+)(?:\.\d*)?$/) {
-      return $1;
-    }
-    if(defined $cpu{bogomips} && $cpu{bogomips} =~ /^(\d+)(?:\.\d*)?$/) {
-      return $1;
-    }
-    slog("Unable to parse CPU info from /proc/cpuinfo",2);
-    return 0;
-  }else{
-    slog("Unable to retrieve CPU info from /proc/cpuinfo",2);
-    return 0;
-  }
 }
 
 sub getLocalLanIp {
@@ -1136,21 +1110,19 @@ sub hCheckProbSmurfs {
     my @entryData;
     my @ids=($p_s->{id1},$p_s->{id2});
     foreach my $id (@ids) {
-      my $sth=$sldb->prepExec("select ud.userId,ud.name,c.country,ca.nb,cpus.cpu,cpusa.nb,UNIX_TIMESTAMP(a.lastUpdate),coalesce(rtp.inGame,-1),a.rank,group_concat(n.name order by n.lastConnection desc)
+      my $sth=$sldb->prepExec("select ud.userId,ud.name,c.country,ca.nb,UNIX_TIMESTAMP(a.lastUpdate),coalesce(rtp.inGame,-1),a.rank,group_concat(n.name order by n.lastConnection desc)
   from userDetails ud,
        accounts a,
        names n,
        userAccounts ua left join rtPlayers rtp on ua.accountId=rtp.accountId,
        countries c join (select c1.accountId accountId,max(lastConnection) maxLastConn, count(*) nb from countries c1 where c1.accountId=$id group by c1.accountId) ca
-         on c.accountId=ca.accountId and c.lastConnection=ca.maxLastConn,
-       cpus join (select cpus1.accountId accountId,max(lastConnection) maxLastConn, count(*) nb from cpus cpus1 where cpus1.accountId=$id group by cpus1.accountId) cpusa
-         on cpus.accountId=cpusa.accountId and cpus.lastConnection=cpusa.maxLastConn
+         on c.accountId=ca.accountId and c.lastConnection=ca.maxLastConn
     where ud.userId=ua.userId
           and ua.accountId=$id
           and a.id=$id
           and n.accountId=$id
     group by n.accountId","");
-      my ($userId,$userName,$country,$nbCountry,$cpu,$nbCpu,$lastUpdate,$inGame,$rank,$names)=$sth->fetchrow_array();
+      my ($userId,$userName,$country,$nbCountry,$lastUpdate,$inGame,$rank,$names)=$sth->fetchrow_array();
       my $accountName;
       if($names =~ /^([^,]+),(.*)$/) {
         ($accountName,$names)=($1,$2);
@@ -1175,11 +1147,6 @@ sub hCheckProbSmurfs {
         $nbCountry-=1;
         $countryString.=" (+$nbCountry)";
       }
-      my $cpuString=$cpu;
-      if($nbCpu > 1) {
-        $nbCpu-=1;
-        $cpuString.=" (+$nbCpu)";
-      }
       my $accountActivity;
       if($inGame == -1) {
         my $accountAge=time-$lastUpdate;
@@ -1200,7 +1167,6 @@ sub hCheckProbSmurfs {
       push(@entryData,{"$C{5}AccountName [UserName]" => "$C{2}$accountName",
                        AccountId => $accountId,
                        Country => "$C{1}$countryString",
-                       Cpu => $cpuString,
                        LastActivity => $accountActivity,
                        Rank => $rankColors{$rank}.$rank,
                        PreviousNames => "$C{1}$names"});
@@ -1216,7 +1182,7 @@ sub hCheckProbSmurfs {
   }
   
   if(@searchResults) {
-    my $p_resultLines=formatArray(["$C{5}AccountName [UserName]",'AccountId','Country','Cpu','LastActivity','Rank','PreviousNames'],\@searchResults,"$C{2}List of probable smurfs$C{1}",80);
+    my $p_resultLines=formatArray(["$C{5}AccountName [UserName]",'AccountId','Country','LastActivity','Rank','PreviousNames'],\@searchResults,"$C{2}List of probable smurfs$C{1}",80);
     sayPrivate($user,'.');
     foreach my $resultLine (@{$p_resultLines}) {
       sayPrivate($user,$resultLine);
@@ -2861,23 +2827,24 @@ sub genericWhois {
   while(@results=$sth->fetchrow_array()) {
     push(@countries,$results[0]);
   }
-  my @cpus;
-  $sth=$sldb->prepExec("select cpu from cpus where accountId=$accountId order by lastConnection desc");
-  while(@results=$sth->fetchrow_array()) {
-    push(@cpus,$results[0]);
-  }
   my @hardwareIds;
   $sth=$sldb->prepExec("select hardwareId from hardwareIds where accountId=$accountId order by lastConnection desc");
   while(@results=$sth->fetchrow_array()) {
     push(@hardwareIds,$results[0]);
+  }
+  my @systemIds;
+  $sth=$sldb->prepExec("select lower(hex(systemId)) from systemIds where accountId=$accountId order by lastConnection desc");
+  while(@results=$sth->fetchrow_array()) {
+    push(@systemIds,$results[0]);
   }
 
   for my $i (0..$#hardwareIds) {
     $hardwareIds[$i]='??' if($hardwareIds[$i] eq '2147483647');
     $hardwareIds[$i]='???' if($hardwareIds[$i] eq '1236934115');
   }
-  my ($name,$country,$cpu,$hardwareId)=(shift @names,shift @countries,shift @cpus,shift @hardwareIds);
+  my ($name,$country,$hardwareId,$systemId)=(shift @names,shift @countries,shift @hardwareIds,shift @systemIds);
   $hardwareId='?' unless(defined $hardwareId);
+  $systemId='?' unless(defined $systemId);
 
   my ($p_C,$B)=initUserIrcColors($user);
   my %C=%{$p_C};
@@ -2902,13 +2869,13 @@ sub genericWhois {
                     AccountId => "$C{14}$accountId",
                     Status => $statusMapping{$inGame},
                     Country => "$C{1}$country",
-                    CPU => $cpu,
                     HardwareId => $hardwareId,
+                    SystemId => $systemId,
                     Rank => $rankColors{$rank}.$rank,
                     LastActivity => $accountActivity,
                     IpMode => $nbIp == 30 ? "$C{4}Dynamic" : "$C{1}Static($nbIp)" );
 
-  my $p_resultLines=formatArray(["$C{14}UserName",'UserId',"$C{5}AccountName",'AccountId','Status','Country','CPU','HardwareId','Rank','LastActivity','IpMode'],[\%whoisData],"$C{2}Account Information$C{1}");
+  my $p_resultLines=formatArray(["$C{14}UserName",'UserId',"$C{5}AccountName",'AccountId','Status','Country','HardwareId','SystemId','Rank','LastActivity','IpMode'],[\%whoisData],"$C{2}Account Information$C{1}");
   sayPrivate($user,'.');
   foreach my $resultLine (@{$p_resultLines}) {
     sayPrivate($user,$resultLine);
@@ -2917,8 +2884,8 @@ sub genericWhois {
   my @historicData;
   push(@historicData,{ "$C{5}Info" => "$C{10}Name$C{1}", PreviousValues => join(',',@names) }) if(@names);
   push(@historicData,{ "$C{5}Info" => "$C{10}Country$C{1}", PreviousValues => join(',',@countries) }) if(@countries);
-  push(@historicData,{ "$C{5}Info" => "$C{10}CPU$C{1}", PreviousValues => join(',',@cpus) }) if(@cpus);
   push(@historicData,{ "$C{5}Info" => "$C{10}HardwareId$C{1}", PreviousValues => join(',',@hardwareIds) }) if(@hardwareIds);
+  push(@historicData,{ "$C{5}Info" => "$C{10}SystemId$C{1}", PreviousValues => join(',',@systemIds) }) if(@systemIds);
   if(@historicData) {
     $p_resultLines=formatArray(["$C{5}Info",'PreviousValues'],\@historicData,"$C{2}Account history$C{1}");
     sayPrivate($user,'.');
@@ -3098,7 +3065,7 @@ sub cbLobbyConnect {
 
   my $localLanIp=$conf{localLanIp};
   $localLanIp=getLocalLanIp() unless($localLanIp);
-  queueLobbyCommand(["LOGIN",$conf{lobbyLogin},$lobby->marshallPasswd($conf{lobbyPassword}),getCpuSpeed(),$localLanIp,"SldbLi v$sldbLiVer",0,'a b sp et'],
+  queueLobbyCommand(["LOGIN",$conf{lobbyLogin},$lobby->marshallPasswd($conf{lobbyPassword}),0,$localLanIp,"SldbLi v$sldbLiVer",0,'l t sp cl'],
                     {ACCEPTED => \&cbLoginAccepted,
                      DENIED => \&cbLoginDenied,
                      AGREEMENTEND => \&cbAgreementEnd},
@@ -3300,8 +3267,14 @@ sub cbSaidPrivate {
 }
 
 sub cbChannelTopic {
-  my (undef,$chan,$user,$time,$topic)=@_;
-  logMsg("channel_$chan","* Topic is '$topic' (set by $user)") if($conf{logChanChat});
+  my (undef,$chan,$user,$topic)=@_;
+  if($conf{logChanChat}) {
+    if(defined $topic && $topic ne '') {
+      logMsg("channel_$chan","* Topic is '$topic' (set by $user)");
+    }else{
+      logMsg("channel_$chan","* No topic is set");
+    }
+  }
 }
 
 # Main ########################################################################
