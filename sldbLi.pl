@@ -8,7 +8,7 @@
 # - offer basic ranking data to players and advanced ranking data to SLDB admins
 # - allow SLDB admins to manage SLDB user data manually
 #
-# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -28,10 +28,13 @@ use strict;
 
 use POSIX (':sys_wait_h','ceil');
 
+use FindBin;
 use IO::Select;
 use List::Util 'first';
 use Storable qw'nstore retrieve';
 use Text::ParseWords;
+
+use lib $FindBin::Bin;
 
 use SimpleLog;
 use Sldb;
@@ -2026,6 +2029,15 @@ sub hSearchUser {
   }elsif($#{$p_params}==0 && $p_params->[0] =~ /^\&(\-?\d+)$/) {
     $search=$1;
     $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(hw.lastConnection) from userAccounts ua,hardwareIds hw where ua.accountId=hw.accountId and hw.hardwareId=$search order by hw.lastConnection desc limit 1000","retrieve users with accounts matching hardwareId \"$search\" from userAccounts and hardwareIds [!searchUser]");
+    my %userIdsTs;
+    while(@results=$sth->fetchrow_array()) {
+      $userIdsTs{$results[0]}=$results[2] unless(exists $userIdsTs{$results[0]} && $userIdsTs{$results[0]} >= $results[2]);
+      $accountIds{$results[1]}=1;
+    }
+    @userIds=sort {$userIdsTs{$b} <=> $userIdsTs{$b}} (keys %userIdsTs);
+  }elsif($#{$p_params}==0 && $p_params->[0] =~ /^\%([\da-f]+)$/) {
+    $search=$1;
+    $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(sys.lastConnection) from userAccounts ua,systemIds sys where ua.accountId=sys.accountId and sys.systemId=conv('$search',16,10) order by sys.lastConnection desc limit 1000","retrieve users with accounts matching systemId \"$search\" from userAccounts and systemIds [!searchUser]");
     my %userIdsTs;
     while(@results=$sth->fetchrow_array()) {
       $userIdsTs{$results[0]}=$results[2] unless(exists $userIdsTs{$results[0]} && $userIdsTs{$results[0]} >= $results[2]);

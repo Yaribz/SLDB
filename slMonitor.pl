@@ -7,7 +7,7 @@
 # - monitor and store all lobby data (users, battles...) into SLDB in realtime
 # - receive, check, and store game data reports (GDR) sent by SPADS into SLDB
 #
-# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -505,7 +505,7 @@ sub cbServerMsg {
       slog("Ignoring invalid hardwareId \"$ids[0]\" received for user \"$user\"",2);
       $ids[0]=undef;
     }
-    if(defined $ids[1] && $ids[1] !~ /^[0-9a-f]{,16}$/) {
+    if(defined $ids[1] && $ids[1] !~ /^[0-9a-f]{1,16}$/) {
       slog("Ignoring invalid systemId \"$ids[1]\" received for user \"$user\"",2);
       $ids[1]=undef;
     }

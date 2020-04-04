@@ -63,7 +63,8 @@
 !searchUser <nameString>|@<ipAddr>|&<hardwareId> - searches users using name, IP address, or hardware ID filters [alias: !su]
 "!searchUser bib" searches all users containing "bib" in their name
 "!searchUser @1.2.3.4" searches all users who used IP address "1.2.3.4"
-"!searchUser &-1333568" searches all users who used hardware ID "-1333568"
+"!searchUser &-1333568" searches all users seen with hardware ID "-1333568"
+"!searchUser %837693f9073bdc8e" searches all users seen with system ID "837693f9073bdc8e"
 
 [sendLobby]
 !sendLobby <lobbyCommand> - send raw command to lobby server
