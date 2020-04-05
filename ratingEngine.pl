@@ -5,7 +5,7 @@
 # The rating engine is in charge of computing all games results to produce
 # players ranking data. It is based on TrueSkill(tm) ranking algorithm.
 #
-# Copyright (C) 2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.2 (2018/11/29)
+# Version 0.3 (2020/04/05)
 
 use strict;
 
@@ -162,12 +162,9 @@ sub secToTime {
   return "$startString and $endString";
 }
 
-sub currentMonth {
-  return (localtime())[4]+1;
-}
-
-sub currentYear {
-  return (localtime())[5]+1900;
+sub currentYearAndMonth {
+  my @lTime=localtime();
+  return ($lTime[5]+1900,$lTime[4]+1);
 }
 
 sub previousYearMonth {
@@ -216,6 +213,20 @@ sub copyRatings {
     $clonedRatings{$ratingType}=new Rating($p_ratings->{$ratingType}->{mu}+0,$p_ratings->{$ratingType}->{sigma}+0);
   }
   return \%clonedRatings;
+}
+
+sub createPartitionsIfNeeded {
+  my $period=shift;
+  my ($sth,@countResult);
+  foreach my $gType (keys %gameRatingMapping) {
+    $sth=$sldb->prepExec("select count(*) from information_schema.partitions where table_schema='$conf{dbName}' and table_name='ts${gType}Players' and partition_name='p$period'","check partition existence on table ts${gType}Players for period $period");
+    @countResult=$sth->fetchrow_array();
+    error("Unable to query table information_schema.partitions for partition existence check") unless(@countResult);
+    if($countResult[0] < 1) {
+      slog("Creating new partition p$period in table ts${gType}Players",4);
+      $sldb->do("alter table ts${gType}Players add partition (partition p$period values in ($period))","add partition \"p$period\" to table ts${gType}Players");
+    }
+  }
 }
 
 sub rateNewGame {
@@ -274,6 +285,7 @@ sub rateNewGame {
       applyMonthPenalties($currentRatingYear,$currentRatingMonth,$modShortName);
     }
     slog("Initializing rating tables for new month ($gdrYear-$gdrMonth)",3);
+    createPartitionsIfNeeded($gdrYear.$gdrMonth);
     foreach my $gType (keys %gameRatingMapping) {
       $sldb->do("insert into ts${gType}Players (select $gdrYear$gdrMonth,userId,modShortName,skill,mu,sigma,nbPenalties from ts${gType}Players where period=$currentRatingYear$currentRatingMonth)","initialize players rating of $gdrYear-$gdrMonth from $currentRatingYear-$currentRatingMonth");
     }
@@ -876,6 +888,7 @@ sub rateMonth {
 
   my $postRatingTime=time;
 
+  createPartitionsIfNeeded($ratePeriod);
   foreach my $gameType (keys %gameRatingMapping) {
     $sldb->do("delete from ts${gameType}Players where period=$ratePeriod and modShortName=$quotedModShortName","flush ts${gameType}Players table for $modShortName and period $ratePeriod");
     my $ratingType=$gameRatingMapping{$gameType};
@@ -920,8 +933,7 @@ my $p_ratingState=$sldb->getRatingState();
 if(! exists $p_ratingState->{currentRatingMonth}) {  
   slog("Start of batch rating (ratings initialization)",3);
   $sldb->do("insert into tsRatingState values('batchRatingStatus',1) on duplicate key update value=1",'update batchRatingStatus parameter to 1 in tsRatingState table');
-  $currentRatingYear=currentYear();
-  $currentRatingMonth=currentMonth();
+  ($currentRatingYear,$currentRatingMonth)=currentYearAndMonth();
   my $p_allMods=$sldb->getModsShortNames();
   foreach my $modShortName (@{$p_allMods}) {
     my $quotedModShortName=$sldb->quote($modShortName);
@@ -937,7 +949,9 @@ if(! exists $p_ratingState->{currentRatingMonth}) {
   $currentRatingYear=$p_ratingState->{currentRatingYear};
   $currentRatingMonth=$p_ratingState->{currentRatingMonth};
 }
+
 $currentRatingMonth=sprintf('%02d',$currentRatingMonth);
+createPartitionsIfNeeded($currentRatingYear.$currentRatingMonth);
 
 my $rerateTs=0;
 slog("Starting rating queues polling...",3);

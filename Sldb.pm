@@ -1,7 +1,7 @@
 # Perl module implementing the SLDB data model.
 # This file is part of SLDB.
 #
-# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@ use Time::HiRes;
 
 use SimpleLog;
 
-my $moduleVersion='0.2';
+my $moduleVersion='0.3';
 
 my %ADMIN_EVT_TYPE=('UPD_USERDETAILS' => 0,
                     'JOIN_ACC' => 1,
@@ -480,17 +480,8 @@ create table if not exists gamesNames (
   index(shortName)
 ) engine=MyISAM','create table "gamesNames"');
 
-  my $partitionDefs="partition by list(period) (";
-  for my $year (2012..2017) {
-    for my $i (1..12) {
-      next if($year == 2012 && $i < 7);
-      $partitionDefs.=',' unless($year == 2012 && $i == 7);
-      my $month=sprintf("%02d",$i);
-      my $period=$year.$month;
-      $partitionDefs.="\n  partition p$period values in ($period)";
-    }
-  }
-  $partitionDefs.="\n)";
+  my @lTime=localtime();
+  my $currentPeriod=($lTime[5]+1900).sprintf('%02d',$lTime[4]+1);
 
   foreach my $gameType (values %gameTypeMapping) {
     $self->do("
@@ -521,8 +512,7 @@ create table if not exists ts${gameType}Players (
   nbPenalties smallint unsigned,
   primary key (period,userId,modShortName),
   index(skill)
-) engine=MyISAM
-$partitionDefs","create partitioned table \"ts${gameType}Players\"");
+) engine=MyISAM partition by list(period) ( partition p$currentPeriod values in ($currentPeriod) )","create partitioned table \"ts${gameType}Players\"");
   }
 
   $self->do('
@@ -1025,15 +1015,16 @@ sub getCurrentRatingYearMonth {
   my $self=shift;
   my $p_ratingState=$self->getRatingState();
   my ($currentRatingYear,$currentRatingMonth);
+  my @lTime=localtime();
   if(! exists $p_ratingState->{currentRatingYear}) {
     $self->log("Unable to retrieve current rating year from rating state table, using current year instead!",2);
-    $currentRatingYear=(localtime())[5]+1900;
+    $currentRatingYear=$lTime[5]+1900;
   }else{
     $currentRatingYear=$p_ratingState->{currentRatingYear};
   }
   if(! exists $p_ratingState->{currentRatingMonth}) {
     $self->log("Unable to retrieve current rating month from rating state table, using current month instead!",2);
-    $currentRatingMonth=(localtime())[4]+1;
+    $currentRatingMonth=$lTime[4]+1;
   }else{
     $currentRatingMonth=$p_ratingState->{currentRatingMonth};
   }
