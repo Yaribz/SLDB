@@ -52,7 +52,7 @@ and access players ranking data and statistics. It is used by the Spring
 replay site to display SLDB data to players in realtime.
 
 
-zkMonitor (Zero-K monitor)
+zkMonitor (Zero-K monitor) [DEPRECATED]
 =========
 zkMonitor implements the Zero-K website monitoring functionality for SLDB.
 zkMonitor is an HTTP bot, it monitors the Zero-K website to detect newly

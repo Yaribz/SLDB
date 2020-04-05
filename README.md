@@ -30,7 +30,7 @@ Components
 * [sldbSetup.pl](sldbSetup.pl): Setup script
 * [slMonitor.pl](slMonitor.pl): Lobby monitoring application
 * [xmlRpc.pl](xmlRpc.pl): XmlRpc interface
-* [zkMonitor.pl](zkMonitor.pl): Zero-K monitoring application
+* [zkMonitor.pl](zkMonitor.pl): Zero-K monitoring application (deprecated)
 * [Lobby interface configuration templates](etc): Templates for the
   configuration of the lobby interface bot (other SLDB configuration files are
   generated in the same directory by the setup script)
@@ -65,7 +65,8 @@ modules to be available on the system (easily installable through CPAN):
 * ratingEngine requires the "Inline::Python" Perl module
 * xmlRpc requires the "RPC::XML::Server" Perl module ("Net::Server::PreFork" is
   also highly recommended)
-* zkMonitor requires the "HTML::TreeBuilder" and "WWW::Mechanize" Perl modules
+* zkMonitor (deprecated) requires the "HTML::TreeBuilder" and "WWW::Mechanize" 
+  Perl modules
 
 SLDB also depends on following project (hosted remotely) for additional
 functionalities:
@@ -84,9 +85,14 @@ Installation
   with SLDB)
 * Use your favorite Perl package manager to install following standard Perl
   modules (available on CPAN) and their dependencies: Inline::Python,
-  RPC::XML::Server, Net::Server::PreFork, HTML::TreeBuilder and WWW::Mechanize
+  RPC::XML::Server, Net::Server::PreFork (and also HTML::TreeBuilder and 
+  WWW::Mechanize if you plan to use the deprecated zkMonitor component)
 * run the sldbSetup.pl script from SLDB directory and execute all steps, as
   selectionned by default by the script
+* Insert rows in the "gamesNames" table of the SLDB database to declare the 
+  list of games for which TrueSkill should be enabled (the regex fields are in 
+  standard MySQL/MariaDB regular expressions format, as described 
+  [here](https://mariadb.com/kb/en/regular-expressions-overview/))
 * Edit the etc/sldbLi.conf file to set following parameters:
   * lobbyPassword (password of the lobby account used by sldbLi)
   * sldb (replace  &lt;dbLogin&gt;, &lt;dbPwd&gt; and &lt;dbName&gt; by the
@@ -102,7 +108,6 @@ Installation
 * You are now ready to launch all SLDB components, using recommended order:
 
         ./slMonitor.pl
-        ./zkMonitor.pl
         ./ratingEngine.pl
         ./sldbLi.pl
         ./xmlRpc.pl

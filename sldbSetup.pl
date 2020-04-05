@@ -6,7 +6,7 @@
 # - database initialization
 # - components configuration
 #
-# Copyright (C) 2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -40,7 +40,9 @@ require SimpleLog;
 require Sldb;
 
 my $confFile=catfile($scriptDir,'etc',"$scriptBaseName.conf");
-my @sldbComponents=qw/slMonitor zkMonitor ratingEngine xmlRpc/;
+# zkMonitor is deprecated
+#my @sldbComponents=qw/slMonitor zkMonitor ratingEngine xmlRpc/;
+my @sldbComponents=qw/slMonitor ratingEngine xmlRpc/;
 my %specificParams=(slMonitor => { lobbyPassword => 'Spring lobby password for SpringLobbyMonitor account',
                                    lobbyAdminIds => 'list of Spring lobby account IDs having admin access on slMonitor, comma separated' },
                     xmlRpc => { listenAddr => 'listening address for XmlRpc interface, example: "12.34.56.78"',
