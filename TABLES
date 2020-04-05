@@ -12,7 +12,7 @@ Main lobby tables: (filled by slMonitor by monitoring Spring lobby)
   cpus: accountId, cpu, lastConnection
   hardwareIds: accountId, hardwareId, lastConnection
   systemIds: accountId, systemId, lastConnection
-  games: hostAccountId, startTimestamp, endTimestamp, endCause, hostName, modName, mapName, nbSpec, nbPlayer, description, passworded, gameId
+  games: hostAccountId, startTimestamp, endTimestamp, endCause, hostName, modName, mapName, nbSpec, nbPlayer, description, passworded, engineName, engineVersion, gameId
   players: hostAccountId, startTimestamp, accountId, name
 
 Games details tables: (filled by slMonitor from GDR data sent by SPADS, and by zkMonitor from Zero-K website)

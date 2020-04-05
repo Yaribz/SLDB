@@ -39,7 +39,7 @@ require SimpleLog;
 require Sldb;
 require SpringLobbyInterface;
 
-my $slMonVer='0.2';
+my $slMonVer='0.3';
 
 my $confFile=catfile($scriptDir,'etc',"$scriptBaseName.conf");
 $confFile=$ARGV[0] if($#ARGV == 0);
@@ -417,9 +417,10 @@ sub cbClientStatus {
               slog("CLIENTSTATUS: A monitored battle went in game, storing game data in database (\"$user\" <-> battle \"$bId\") [$lobby->{users}->{$user}->{accountId},$timestamp]",5);
               my $battleTitle=$lobby->{battles}->{$bId}->{title};
               $battleTitle=$1 if($battleTitle =~ /^Incompatible \(spring [^\)]*\) *(.*)$/);
-              my ($quotedUser,$quotedMod,$quotedMap);
-              ($battleTitle,$quotedUser,$quotedMod,$quotedMap)=$sldb->quote($battleTitle,$user,$lobby->{battles}->{$bId}->{mod},$lobby->{battles}->{$bId}->{map});
-              $sldb->do("insert into games values ($monitoredGames{$bId}->{accountId},FROM_UNIXTIME($timestamp),0,0,$quotedUser,$quotedMod,$quotedMap,$nbSpecs,$nbPlayers,$battleTitle,$lobby->{battles}->{$bId}->{passworded},NULL)","insert into games table for game ($monitoredGames{$bId}->{accountId},$timestamp)");
+              my ($quotedUser,$quotedMod,$quotedMap,$quotedEngineName,$quotedEngineVersion);
+              ($battleTitle,$quotedUser,$quotedMod,$quotedMap,$quotedEngineName,$quotedEngineVersion)=$sldb->quote($battleTitle,$user,$lobby->{battles}->{$bId}->{mod},$lobby->{battles}->{$bId}->{map},$lobby->{battles}{$bId}{engineName},$lobby->{battles}{$bId}{engineVersion});
+              $sldb->do("insert into games values ($monitoredGames{$bId}->{accountId},FROM_UNIXTIME($timestamp),0,0,$quotedUser,$quotedMod,$quotedMap,$nbSpecs,$nbPlayers,$battleTitle,$lobby->{battles}->{$bId}->{passworded},$quotedEngineName,$quotedEngineVersion,NULL)",
+                        "insert into games table for game ($monitoredGames{$bId}->{accountId},$timestamp)");
               foreach my $player (@userList) {
                 my $quotedPlayer=$sldb->quote($player);
                 $sldb->do("insert into players values ($monitoredGames{$bId}->{accountId},FROM_UNIXTIME($timestamp),$lobby->{users}->{$player}->{accountId},$quotedPlayer)","insert into players table for player ($monitoredGames{$bId}->{accountId},FROM_UNIXTIME($timestamp),$lobby->{users}->{$player}->{accountId})");

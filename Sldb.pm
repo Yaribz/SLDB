@@ -26,7 +26,7 @@ use Time::HiRes;
 
 use SimpleLog;
 
-my $moduleVersion='0.3';
+my $moduleVersion='0.4';
 
 my %ADMIN_EVT_TYPE=('UPD_USERDETAILS' => 0,
                     'JOIN_ACC' => 1,
@@ -255,12 +255,15 @@ create table if not exists games (
   nbPlayer tinyint unsigned,
   description varchar(255),
   passworded tinyint(1) unsigned,
+  engineName varchar(30),
+  engineVersion varchar(100),
   gameId char(32),
   primary key (hostAccountId,startTimestamp),
   index (startTimestamp),
   index (endTimestamp),
   index (modName),
   index (mapName),
+  index (engineVersion),
   unique index (gameId)
 ) engine=MyISAM','create table "games"');
 
