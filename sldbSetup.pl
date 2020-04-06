@@ -259,9 +259,10 @@ sub executeConfigureStep {
   for my $param (keys %conf) {
     my $prompt=$param;
     $prompt.=" (previous value: $p_compConf->{$param}) " if(exists $p_compConf->{$param} && $p_compConf->{$param} ne $conf{$param});
+    my $allowedRegex = $param =~ /Pwd$/ ? qr/^.+$/ : qr/^\w+$/;
     my $value=$t->get_reply( print_me => "Please enter the $param setting value for $comp:",
                              prompt => "$prompt?",
-                             allow => qr/^\w+$/,
+                             allow => $allowedRegex,
                              default => $conf{$param} );
     $compConf{$param}=$value;
   }
