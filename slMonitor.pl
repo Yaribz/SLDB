@@ -39,7 +39,7 @@ require SimpleLog;
 require Sldb;
 require SpringLobbyInterface;
 
-my $slMonVer='0.3';
+my $slMonVer='0.4';
 
 my $confFile=catfile($scriptDir,'etc',"$scriptBaseName.conf");
 $confFile=$ARGV[0] if($#ARGV == 0);
@@ -153,7 +153,6 @@ my %monitoredBattles;
 my %monitoredGames;
 my %GDRs;
 my $lSock;
-my %newUsers;
 
 my $sldb=Sldb->new({dbDs => $dbDs,
                     dbLogin => $conf{dbLogin},
@@ -243,7 +242,6 @@ sub cbLoginInfoEnd {
 sub cbAddUser {
   my (undef,$user,$country,$id,$lobbyClient)=@_;
   return if($user eq 'ChanServ');
-  $newUsers{$user}=1;
   if(! defined $country) {
     slog("Received an invalid ADDUSER command from server (country field not provided for user $user)",2);
     $country='??';
@@ -256,6 +254,13 @@ sub cbAddUser {
     slog("Received an invalid ADDUSER command from server (accountId field not provided or invalid for user $user)",1);
     return;
   }
+  
+  my $sth=$sldb->prepExec("select count(*) from accounts where id=$id","check if id \"$id\" is already known in accounts table");
+  my @accountsCount=$sth->fetchrow_array();
+  if($accountsCount[0] == 0) {
+    $sldb->do("insert into accounts values ($id,0,0,0,now())","insert new account data in accounts table for account \"$id\" and name \"$user\"");
+  }
+  
   seenUser($user,$id);
   $lobby->sendCommand(['GETUSERID',$user]);
   $lobby->sendCommand(['GETIP',$user]);
@@ -379,7 +384,6 @@ sub cbPreClientStatus {
 
 sub cbClientStatus {
   my (undef,$user)=@_;
-  delete $newUsers{$user};
   if(! exists $lobby->{users}->{$user}) {
     slog("Ignoring invalid CLIENTSTATUS command (unknown user \"$user\")",2);
     return;
@@ -623,7 +627,6 @@ sub seenSystemId {
 sub seenLobbyIp {
   my ($user,$ip)=@_;
   return unless(exists $lobby->{users}->{$user});
-  cbClientStatus(undef,$user) if(exists $newUsers{$user});
   my $id=$lobby->{users}->{$user}->{accountId};
 
   my $ipNb;
