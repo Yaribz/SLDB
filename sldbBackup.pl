@@ -24,7 +24,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.2 (2014/11/05)
+# Version 0.3 (2020/04/29)
 
 use strict;
 
@@ -35,6 +35,9 @@ use Time::Piece;
 ################################################################################
 #                              Configuration                                   #
 ################################################################################
+
+# name of the SLDB database
+my $sldbName='sldb';
 
 # absolute directory where backup archives will be stored locally
 my $backupDir='/home/sldb/var';
@@ -62,10 +65,10 @@ my $tmpDir="$backupDir/backup_".(localtime->strftime('%Y%m%d_%H%M%S'));
 mkpath($tmpDir);
 
 print "Performing backup.\n" if($verbose);
-system("$mysqlhotcopyBin -q --noindices sldb $tmpDir");
+system("$mysqlhotcopyBin -q --noindices $sldbName $tmpDir");
 
 print "Archiving backup.\n" if($verbose);
-system("tar c -C $tmpDir -f $tmpDir.tar sldb");
+system("tar c -C $tmpDir -f $tmpDir.tar $sldbName");
 
 print "Removing temporary files.\n" if($verbose);
 rmtree("$tmpDir");
