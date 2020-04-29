@@ -902,7 +902,7 @@ END_OF_EVAL_LIST
   my $sth;
   my @skillGraphsFiles;
   my %skillGraphsData;
-  foreach my $gameType (keys %gameTypeMapping) {
+  foreach my $gameType (qw'Duel Team FFA TeamFFA Global') {
     my $gType=$gameTypeMapping{$gameType};
     $sth=$self->prepExec("select muBefore,sigmaBefore from ts${gType}Games where userId=$userId and modShortName=$quotedModShortName order by gdrTimestamp limit 1","retrieve initial skill data for mod $modShortName, user $userId and game type $gameType from table ts${gType}Games");
     my @result=$sth->fetchrow_array();
@@ -947,8 +947,19 @@ END_OF_EVAL_LIST
     $defctx->range_axis->label('TrueSkill');
     $defctx->range_axis->label_color(Graphics::Color::RGB->new(red => 0, green => 0, blue => 1, alpha => 1));
     $defctx->range_axis->label_font->weight('bold');
-    $defctx->domain_axis->tick_values([1..$index-1]);
-    $defctx->domain_axis->tick_labels(\@periods);
+    my (@xAxisValues,@xAxisLabels);
+    if($index > 20) {
+      for my $i (1..19) {
+        my $xValue=int($index * $i / 20);
+        push(@xAxisValues,$xValue);
+        push(@xAxisLabels,$periods[$xValue-1]);
+      }
+    }else{
+      @xAxisLabels = @periods;
+      @xAxisValues = (1..$index-1);
+    }
+    $defctx->domain_axis->tick_labels(\@xAxisLabels);
+    $defctx->domain_axis->tick_values(\@xAxisValues);
     $defctx->domain_axis->tick_label_angle(0.785);
     $defctx->domain_axis->label('Time');
     $defctx->domain_axis->label_font->weight('bold');
