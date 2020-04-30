@@ -49,7 +49,7 @@ sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
 sub none (&@) { my $c = shift; return ! defined first {&$c} @_; }
 sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
-my $sldbLiVer='0.2';
+my $sldbLiVer='0.3';
 
 $SIG{CHLD} = \&sigChldHandler;
 $SIG{TERM} = \&sigTermHandler;
@@ -69,12 +69,19 @@ my %gameTypeMapping=('Duel' => 'Duel',
                      'TeamFFA' => 'TeamFfa',
                      'Global' => '');
 
+my @orderedAnsiColors=([30],[22,39],[1,32],[32],[1,31],[1,37],[35],[1,33],[1,33],[1,32],[1,36],[1,36],[36],[1,35],[2,36],[2,37]);
+my %ansiColors;
 my %ircColors;
 my %noColor;
 for my $i (0..15) {
+  $ansiColors{$i}='[0m';
+  foreach my $ansiColCode (@{$orderedAnsiColors[$i]}) {
+    $ansiColors{$i}.='['.$ansiColCode.'m';
+  }
   $ircColors{$i}=''.sprintf('%02u',$i);
   $noColor{$i}='';
 }
+my @ansiStyle=(\%ansiColors,'[7m');
 my @ircStyle=(\%ircColors,'');
 my @noIrcStyle=(\%noColor,'');
 
@@ -134,7 +141,7 @@ $masterChannel=$1 if($masterChannel =~ /^([^\s]+)\s/);
 my %conf=%{$botConf->{conf}};
 $sLog=$botConf->{log};
 slog("IpWhois module unavailable, !ipWhois command is disabled",2) if($ipWhoisModuleUnavailable);
-my $lSock;
+my ($lSock,$adminListenSock,@adminClientSockets);
 my @sockets=();
 my $running=1;
 my $quitScheduled=0;
@@ -352,6 +359,7 @@ sub realLength {
   my $s=shift;
   $s=~s/\d{1,2}(?:,\d{1,2})?//g;
   $s=~s/[]//g;
+  $s=~s/\[\d{1,2}m//g;
   return length($s);
 }
 
@@ -609,6 +617,7 @@ sub broadcastMsg {
     $chan=$1 if($chan =~ /^([^\s]+)\s/);
     sayChan($chan,$msg);
   }
+  sayPrivate('*',$msg);
 }
 
 sub splitMsg {
@@ -619,6 +628,14 @@ sub splitMsg {
 
 sub sayPrivate {
   my ($user,$msg)=@_;
+  if($user eq '*') {
+    $msg.="[0m" if($conf{adminAnsiColors});
+    foreach my $adminSock (@adminClientSockets) {
+      print $adminSock "<$conf{lobbyLogin}> $msg\n";
+      logMsg('admin',"<$conf{lobbyLogin}> $msg");
+    }
+    return;
+  }
   my $p_messages=splitMsg($msg,$conf{maxChatMessageLength}-12-length($user));
   foreach my $mes (@{$p_messages}) {
     queueLobbyCommand(["SAYPRIVATE",$user,$mes]);
@@ -642,6 +659,7 @@ sub getCommandLevels {
 
 sub getUserAccessLevel {
   my $user=shift;
+  return 140 if($user eq '*');
   my $p_userData;
   if(! exists $lobby->{users}->{$user}) {
     return 0;
@@ -718,7 +736,7 @@ sub executeCommand {
   my $command=lc(shift(@cmd));
 
   if(exists $lobbyHandlers{$command}) {
-    if($sldb->getAccountPref($lobby->{users}->{$user}->{accountId},'ircColors') == 2 && $command !~ /^#/ && $command ne 'set') {
+    if($user ne '*' && $sldb->getAccountPref($lobby->{users}->{$user}->{accountId},'ircColors') == 2 && $command !~ /^#/ && $command ne 'set') {
       sayPrivate($user,'*' x 80);
       sayPrivate($user,"WARNING: your ircColors preference is not set. You can either type:");
       sayPrivate($user,"- \"!set ircColors 1\" to keep using colors in bot output and disable this warning.");
@@ -799,6 +817,8 @@ sub checkTimedEvents {
 sub checkCmdFlood {
   my $user=shift;
 
+  return 0 if($user eq '*');
+  
   my $timestamp=time;
   $lastCmds{$user}={} unless(exists $lastCmds{$user});
   $lastCmds{$user}->{$timestamp}=0 unless(exists $lastCmds{$user}->{$timestamp});
@@ -853,6 +873,13 @@ sub logMsg {
 
 sub initUserIrcColors {
   my $user=shift;
+  if($user eq '*') {
+    if($conf{adminAnsiColors}) {
+      return @ansiStyle;
+    }else{
+      return @noIrcStyle;
+    }
+  }
   my $useIrcColors;
   $sldb->getAccountPref($lobby->{users}->{$user}->{accountId},'ircColors',\$useIrcColors);
   if($useIrcColors) {
@@ -1565,16 +1592,18 @@ sub hJoinAcc {
     return 0 unless($test);
   }
 
+  my $adminEventAccountId = $user eq '*' ? 1 : $lobby->{users}->{$user}->{accountId};
+  
   if(%{$p_smurfStates} && ! $test) {
     if(exists $p_smurfStates->{0}) {
       foreach my $p_accs (@{$p_smurfStates->{0}}) {
-        $sldb->adminEvent('DEL_NOT_SMURF',$p_accs->[2] > 1 ? 1 : 0,1,$lobby->{users}->{$user}->{accountId},{accountId1 => $p_accs->[0], accountId2 => $p_accs->[1]});
+        $sldb->adminEvent('DEL_NOT_SMURF',$p_accs->[2] > 1 ? 1 : 0,1,$adminEventAccountId,{accountId1 => $p_accs->[0], accountId2 => $p_accs->[1]});
       }
       answer('Removed '.($#{$p_smurfStates->{0}}+1).' not-smurf entries!');
     }
     if(exists $p_smurfStates->{2}) {
       foreach my $p_accs (@{$p_smurfStates->{2}}) {
-        $sldb->adminEvent('DEL_PROB_SMURF',0,1,$lobby->{users}->{$user}->{accountId},{accountId1 => $p_accs->[0], accountId2 => $p_accs->[1]});
+        $sldb->adminEvent('DEL_PROB_SMURF',0,1,$adminEventAccountId,{accountId1 => $p_accs->[0], accountId2 => $p_accs->[1]});
       }
       answer('Removed '.($#{$p_smurfStates->{2}}+1).' probable smurf entries.');
     }
@@ -1593,7 +1622,7 @@ sub hJoinAcc {
   my $mergeStatus=1;
   $mergeStatus=2 if(exists $p_smurfStates->{2});
   $mergeStatus=0 if(exists $p_smurfStates->{0});
-  $sldb->adminEvent('JOIN_ACC',$mergeStatus,1,$lobby->{users}->{$user}->{accountId},{mainUserId => $mainUserId, childUserId => $childUserId});
+  $sldb->adminEvent('JOIN_ACC',$mergeStatus,1,$adminEventAccountId,{mainUserId => $mainUserId, childUserId => $childUserId});
   my $p_oldUserSmurfs=$sldb->getUserAccounts($childUserId);
   foreach my $accountId (@{$p_oldUserSmurfs}) {
     $sldb->queueGlobalRerate($accountId);
@@ -1601,7 +1630,7 @@ sub hJoinAcc {
   $sldb->do("update userAccounts set userId=$mainUserId where userId=$childUserId","update data in table userAccounts for manual join of \"$childUserId\" to \"$mainUserId\"");
   if($sticky) {
     my ($firstId,$lastId)=$id1 < $id2 ? ($id1,$id2) : ($id2,$id1);
-    $sldb->do("insert into smurfs values ($firstId,$lastId,1,$lobby->{users}->{$user}->{accountId})","add sticky smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
+    $sldb->do("insert into smurfs values ($firstId,$lastId,1,$adminEventAccountId)","add sticky smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
   }
 
   $sldb->computeAllUserIps($mainUserId,30,512);
@@ -1789,11 +1818,12 @@ sub hNotSmurf {
     return 0;
   }
 
+  my $adminEventAccountId = $user eq '*' ? 1 : $lobby->{users}->{$user}->{accountId};
   my ($firstId,$lastId)=$id1 < $id2 ? ($id1,$id2) : ($id2,$id1);
-  $sldb->adminEvent('DEL_PROB_SMURF',3,1,$lobby->{users}->{$user}->{accountId},{accountId1 => $firstId, accountId2 => $lastId});
+  $sldb->adminEvent('DEL_PROB_SMURF',3,1,$adminEventAccountId,{accountId1 => $firstId, accountId2 => $lastId});
   $sldb->deleteAccountsSmurfState($firstId,$lastId);
-  $sldb->adminEvent('ADD_NOT_SMURF',3,1,$lobby->{users}->{$user}->{accountId},{accountId1 => $firstId, accountId2 => $lastId});
-  $sldb->do("insert into smurfs values ($firstId,$lastId,0,$lobby->{users}->{$user}->{accountId})","add not-smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
+  $sldb->adminEvent('ADD_NOT_SMURF',3,1,$adminEventAccountId,{accountId1 => $firstId, accountId2 => $lastId});
+  $sldb->do("insert into smurfs values ($firstId,$lastId,0,$adminEventAccountId)","add not-smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
   answer("Accounts $id1 and $id2 are now marked as not-smurf.");
 }
 
@@ -1801,6 +1831,7 @@ sub hQuit {
   my ($source,$user)=@_;
   my %sourceNames = ( pv => 'private',
                       chan => "channel #$masterChannel" );
+  $user='<ADMIN>' if($user eq '*');
   scheduleQuit("requested by $user in $sourceNames{$source}");
 }
 
@@ -1822,6 +1853,10 @@ sub hRanking {
     }
     $accountString=$p_params->[0];
   }else{
+    if($user eq '*') {
+      answer('A parameter must be provided when using this command from admin interface');
+      return 0;
+    }
     $accountString='#'.$lobby->{users}->{$user}->{accountId};
   }
 
@@ -1970,6 +2005,7 @@ sub hRestart {
   my ($source,$user)=@_;
    my %sourceNames = ( pv => "private",
                        chan => "channel #$conf{masterChannel}");
+  $user='<ADMIN>' if($user eq '*');
   scheduleQuit("requested by $user in $sourceNames{$source}",2);
 }
 
@@ -1979,6 +2015,7 @@ sub hSearchUser {
     invalidSyntax($user,'searchuser');
     return 0;
   }
+  my $resultLimit=$user eq '*' ? 10000 : 200;
 
   my ($p_C,$B)=initUserIrcColors($user);
   my %C=%{$p_C};
@@ -2028,7 +2065,7 @@ sub hSearchUser {
     @userIds=sort {$userIdsTs{$b} <=> $userIdsTs{$b}} (keys %userIdsTs);
   }elsif($#{$p_params}==0 && $p_params->[0] =~ /^\&(\-?\d+)$/) {
     $search=$1;
-    $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(hw.lastConnection) from userAccounts ua,hardwareIds hw where ua.accountId=hw.accountId and hw.hardwareId=$search order by hw.lastConnection desc limit 1000","retrieve users with accounts matching hardwareId \"$search\" from userAccounts and hardwareIds [!searchUser]");
+    $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(hw.lastConnection) from userAccounts ua,hardwareIds hw where ua.accountId=hw.accountId and hw.hardwareId=$search order by hw.lastConnection desc limit $resultLimit","retrieve users with accounts matching hardwareId \"$search\" from userAccounts and hardwareIds [!searchUser]");
     my %userIdsTs;
     while(@results=$sth->fetchrow_array()) {
       $userIdsTs{$results[0]}=$results[2] unless(exists $userIdsTs{$results[0]} && $userIdsTs{$results[0]} >= $results[2]);
@@ -2037,7 +2074,7 @@ sub hSearchUser {
     @userIds=sort {$userIdsTs{$b} <=> $userIdsTs{$b}} (keys %userIdsTs);
   }elsif($#{$p_params}==0 && $p_params->[0] =~ /^\%([\da-f]+)$/) {
     $search=$1;
-    $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(sys.lastConnection) from userAccounts ua,systemIds sys where ua.accountId=sys.accountId and sys.systemId=conv('$search',16,10) order by sys.lastConnection desc limit 1000","retrieve users with accounts matching systemId \"$search\" from userAccounts and systemIds [!searchUser]");
+    $sth=$sldb->prepExec("select ua.userId,ua.accountId,UNIX_TIMESTAMP(sys.lastConnection) from userAccounts ua,systemIds sys where ua.accountId=sys.accountId and sys.systemId=conv('$search',16,10) order by sys.lastConnection desc limit $resultLimit","retrieve users with accounts matching systemId \"$search\" from userAccounts and systemIds [!searchUser]");
     my %userIdsTs;
     while(@results=$sth->fetchrow_array()) {
       $userIdsTs{$results[0]}=$results[2] unless(exists $userIdsTs{$results[0]} && $userIdsTs{$results[0]} >= $results[2]);
@@ -2054,7 +2091,7 @@ sub hSearchUser {
         push(@userIds,$exactMatch);
         $alreadyFoundString=" and ua.userId != $exactMatch";
       }
-      $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name=$quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit 200","retrieve users with accounts matching exactly $quotedSearch from userAccounts and names [!searchUser]");
+      $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name=$quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit $resultLimit","retrieve users with accounts matching exactly $quotedSearch from userAccounts and names [!searchUser]");
       while(@results=$sth->fetchrow_array()) {
         push(@userIds,$results[0]);
       }
@@ -2065,12 +2102,12 @@ sub hSearchUser {
     $quotedSearch=$sldb->quote($search);
     my $alreadyFoundString='';
     $alreadyFoundString=' and ud.userId not in ('.join(',',@userIds).')' if(@userIds);
-    $sth=$sldb->prepExec("select ud.userId from userDetails ud,userAccounts ua,accounts a where ud.name like $quotedSearch$alreadyFoundString and ud.userId=ua.userId and ua.userId=a.id group by ud.userId order by a.lastUpdate desc limit 200","retrieve users whose name matches $quotedSearch from userDetails [!searchUser]");
+    $sth=$sldb->prepExec("select ud.userId from userDetails ud,userAccounts ua,accounts a where ud.name like $quotedSearch$alreadyFoundString and ud.userId=ua.userId and ua.userId=a.id group by ud.userId order by a.lastUpdate desc limit $resultLimit","retrieve users whose name matches $quotedSearch from userDetails [!searchUser]");
     while(@results=$sth->fetchrow_array()) {
       push(@userIds,$results[0]);
     }
     $alreadyFoundString=' and ua.userId not in ('.join(',',@userIds).')' if(@userIds);
-    $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name like $quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit 200","retrieve users with accounts matching $quotedSearch from userAccounts and names [!searchUser]");
+    $sth=$sldb->prepExec("select ua.userId from userAccounts ua,names n where ua.accountId=n.accountId and n.name like $quotedSearch$alreadyFoundString group by ua.userId order by max(n.lastConnection) desc limit $resultLimit","retrieve users with accounts matching $quotedSearch from userAccounts and names [!searchUser]");
     while(@results=$sth->fetchrow_array()) {
       push(@userIds,$results[0]);
     }
@@ -2089,7 +2126,7 @@ sub hSearchUser {
              and ua.accountId=a.id
              and ua.accountId=c.accountId
        group by ua.accountId
-       order by a.lastUpdate desc limit 200","query accounts data for user $userId [!searchUser]");
+       order by a.lastUpdate desc limit $resultLimit","query accounts data for user $userId [!searchUser]");
     my $firstResult=1;
     while(@results=$sth->fetchrow_array()) {
       my $accountId=$results[1];
@@ -2142,9 +2179,9 @@ sub hSearchUser {
         $accountData{"$C{5}UserName"}="$C{2}$results[0]";
       }
       push(@searchResults,\%accountData);
-      last if($#searchResults == 200);
+      last if($#searchResults == $resultLimit);
     }
-    last if($#searchResults == 200);
+    last if($#searchResults == $resultLimit);
   }
   
   if(@searchResults) {
@@ -2153,7 +2190,7 @@ sub hSearchUser {
     foreach my $resultLine (@{$p_resultLines}) {
       sayPrivate($user,$resultLine);
     }
-    sayPrivate($user,"$C{4}Result truncated to first 200 entries.") if($#searchResults == 200);
+    sayPrivate($user,"$C{4}Result truncated to first $resultLimit entries.") if($#searchResults == $resultLimit);
   }else{
     answer("No result!");
   }
@@ -2181,6 +2218,10 @@ sub hSet {
   my ($source,$user,$p_params)=@_;
   if($#{$p_params} < 0 || $#{$p_params} >  1) {
     invalidSyntax($user,'set');
+    return 0;
+  }
+  if($user eq '*') {
+    answer("The set command isn't available from admin interface");
     return 0;
   }
   my ($pref,$val)=@{$p_params};
@@ -2328,7 +2369,7 @@ sub hSetName {
     return 0;
   }
 
-  my $admEvt=$sldb->adminEvent('UPD_USERDETAILS',0,1,$lobby->{users}->{$user}->{accountId},{updatedUserId => $oldUserId, updatedParam => 'name', oldValue => $oldUserName, newValue => $newUser});
+  my $admEvt=$sldb->adminEvent('UPD_USERDETAILS',0,1,$user eq '*' ? 1 : $lobby->{users}->{$user}->{accountId},{updatedUserId => $oldUserId, updatedParam => 'name', oldValue => $oldUserName, newValue => $newUser});
   if($admEvt > 0) {
     $sldb->do("update userDetails set name=$quotedNewUser where userId=$oldUserId");
     answer("Renamed user \"$oldUserName\" ($oldUserId) to \"$newUser\" (admin event: $admEvt)");
@@ -2364,6 +2405,10 @@ sub hSkillGraph {
       return 0;
     }
   }else{
+    if($user eq '*') {
+      answer('A name or account ID parameter must be provided when using this command from admin interface');
+      return 0;
+    }
     $accountString='#'.$lobby->{users}->{$user}->{accountId};
   }
 
@@ -2608,17 +2653,18 @@ sub hSplitAcc {
   my (undef,$p_smurfGroups)=$sldb->getUserOrderedSmurfGroups($userId,[$userId,$accountId],512);
   my $newUserId=$sldb->chooseMainAccountId($p_smurfGroups->[1]);
   my $smurfGroupString=join(',',@{$p_smurfGroups->[1]});
+  my $adminEventAccountId = $user eq '*' ? 1 : $lobby->{users}->{$user}->{accountId};
   foreach my $id (@{$p_smurfGroups->[1]}) {
     my $subType=0;
     $subType=1 if($newUserId!=$id);
-    $sldb->adminEvent('SPLIT_ACC',$subType,1,$lobby->{users}->{$user}->{accountId},{oldUserId => $userId, newUserId => $newUserId, accountId => $id});
+    $sldb->adminEvent('SPLIT_ACC',$subType,1,$adminEventAccountId,{oldUserId => $userId, newUserId => $newUserId, accountId => $id});
     $sldb->queueGlobalRerate($id);
   }
   $sldb->do("update userAccounts set userId=$newUserId where accountId in ($smurfGroupString)","update userAccounts for new main account \"$newUserId\" for smurf group \"$smurfGroupString\"");
   if($sticky) {
     my ($firstId,$lastId)=$userId < $accountId ? ($userId,$accountId) : ($accountId,$userId);
-    $sldb->adminEvent('ADD_NOT_SMURF',0,1,$lobby->{users}->{$user}->{accountId},{accountId1 => $firstId, accountId2 => $lastId});
-    $sldb->do("insert into smurfs values ($firstId,$lastId,0,$lobby->{users}->{$user}->{accountId})","add not-smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
+    $sldb->adminEvent('ADD_NOT_SMURF',0,1,$adminEventAccountId,{accountId1 => $firstId, accountId2 => $lastId});
+    $sldb->do("insert into smurfs values ($firstId,$lastId,0,$adminEventAccountId)","add not-smurf entry \"$firstId\" <-> \"$lastId\" into smurfs table");
   }
 
   $sldb->computeAllUserIps($newUserId,30,512);
@@ -3289,9 +3335,43 @@ sub cbChannelTopic {
   }
 }
 
+sub getSocketType {
+  my $sock=shift;
+  return 'lobby' if(defined $lSock && $sock == $lSock);
+  return 'adminListen' if(defined $adminListenSock && $sock == $adminListenSock);
+  return 'adminClient' if(any {$sock == $_} @adminClientSockets);
+  return 'unknown';
+}
+
+sub removeFromSocketLists {
+  my $sock=shift;
+  if(defined $sock) {
+    my @newAdminClientSockets = grep {$_ != $sock} @adminClientSockets;
+    @adminClientSockets=@newAdminClientSockets;
+  }else{
+    $sock=$lSock;
+  }
+  my @newSockets = grep {$_ != $sock} @sockets;
+  @sockets=@newSockets;
+}
+
 # Main ########################################################################
 
 slog("Initializing SldbLi",3);
+
+if($conf{adminListenAddr} && $conf{adminListenPort}) {
+  slog("Opening socket for admin interface on $conf{adminListenAddr}:$conf{adminListenPort}",3);
+  $adminListenSock=IO::Socket::INET->new(Listen => 1,
+                                         LocalAddr => $conf{adminListenAddr},
+                                         LocalPort => $conf{adminListenPort},
+                                         Proto => 'tcp',
+                                         ReuseAddr => 1);
+  if(! defined $adminListenSock) {
+    slog("Unable to open server socket for admin interface: $@",0);
+    exit 1;
+  }
+  push(@sockets,$adminListenSock);
+}
 
 while($running) {
 
@@ -3302,13 +3382,7 @@ while($running) {
       if(time-$timestamps{connectAttempt} > $conf{lobbyReconnectDelay}) {
         $timestamps{connectAttempt}=time;
         $lobbyState=1;
-        if(defined $lSock) {
-          my @newSockets=();
-          foreach my $sock (@sockets) {
-            push(@newSockets,$sock) unless($sock == $lSock);
-          }
-          @sockets=@newSockets;
-        }
+        removeFromSocketLists() if(defined $lSock);
         $lobby->addCallbacks({REDIRECT => \&cbRedirect});
         $lSock = $lobby->connect(\&cbLobbyDisconnect,{TASSERVER => \&cbLobbyConnect},\&cbConnectTimeout);
         if($lSock) {
@@ -3329,10 +3403,44 @@ while($running) {
   my @pendingSockets=IO::Select->new(@sockets)->can_read(1);
 
   foreach my $pendingSock (@pendingSockets) {
-    if($pendingSock == $lSock) {
+    my $socketType=getSocketType($pendingSock);
+    if($socketType eq 'lobby') {
       $lobby->receiveCommand();
+    }elsif($socketType eq 'adminListen') {
+      my $adminClientSock=$adminListenSock->accept();
+      if(defined $adminClientSock) {
+        my $adminClientIp=$adminClientSock->peerhost();
+        slog("New admin client connection from $adminClientIp",3);
+        push(@sockets,$adminClientSock);
+        push(@adminClientSockets,$adminClientSock);
+      }else{
+        slog("Unable to accept admin connection: $!\n",1);
+      }
+    }elsif($socketType eq 'adminClient') {
+      my $adminCmd=$pendingSock->getline();
+      if(! defined $adminCmd) {
+        slog('Admin client disconnected',3);
+        removeFromSocketLists($pendingSock);
+        shutdown($pendingSock,2);
+        $pendingSock->close();
+      }elsif($adminCmd !~ /^\s*$/) {
+        $adminCmd =~ s/(\cM)?\cJ$//;
+        if($adminCmd eq '!#ping') {
+          print $pendingSock "!#pong\n";
+        }elsif($adminCmd =~ /^\s*\!(\w.*)$/) {
+          $adminCmd=$1;
+          logMsg('admin',"<ADMIN> !$adminCmd");
+          slog("Received admin command: \"$adminCmd\"",4);
+          handleRequest('pv','*',$adminCmd);
+        }else{
+          slog("Ignoring invalid admin command: \"$adminCmd\"",2);
+        }
+      }
     }else{
-      scheduleQuit("received data on unknown socket");
+      slog('Data received on unknown socket!',1);
+      removeFromSocketLists($pendingSock);
+      shutdown($pendingSock,2);
+      $pendingSock->close();
     }
   }
 
@@ -3392,6 +3500,14 @@ if($lobbyState) {
   }
   $lobby->disconnect();
 }
+
+foreach my $sock (@sockets) {
+  next unless(defined $sock);
+  next if(defined $lSock && $sock == $lSock);
+  shutdown($sock,2);
+  $sock->close();
+}
+
 slog('Unable to store smurf bans',1) unless(nstore($p_smurfBans,$conf{varDir}.'/smurfBans.dat'));
 if($quitScheduled == 2) {
   exec($0,$confFile) || forkedError("Unable to restart SldbLi",0);

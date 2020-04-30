@@ -1,7 +1,7 @@
 # sldbLi configuration module
 # This file is part of SLDB.
 #
-# Copyright (C) 2013-2019  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@ use SimpleLog;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.2';
+my $moduleVersion='0.3';
 
 my %globalParameters = (lobbyLogin => ["login"],
                         lobbyPassword => ["password"],
@@ -37,6 +37,9 @@ my %globalParameters = (lobbyLogin => ["login"],
                         localLanIp => ["ipAddr","star","null"],
                         lobbyFollowRedirect => ["bool"],
                         sldb => ['db'],
+                        adminListenAddr => ['ipAddr','null'],
+                        adminListenPort => ['port','null'],
+                        adminAnsiColors => ['bool'],
                         etcDir => ["readableDir"],
                         varDir => ["writableDir"],
                         logDir => ["writableDir"],
