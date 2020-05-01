@@ -19,16 +19,23 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.1 (2020/04/30)
+# Version 0.2 (2020/05/01)
 
 use strict;
 use warnings;
 
+use File::Spec::Functions qw'catfile catdir';
+use FindBin;
 use IO::Select;
 use IO::Socket::INET;
-use List::Util qw'all any none';
+use List::Util qw'all any first none';
 use POSIX ();
 use Term::ReadLine;
+
+my $HIST_SIZE=1000;
+my $HIST_STIFLE_DELAY=60;
+my $CONN_PING_DELAY=15;
+my $CONN_TIMEOUT=40;
 
 sub invalidUsage {
   print "Invalid usage.\nUsage:\n  $0 [<ipAddr>:]<port>\n";
@@ -48,7 +55,26 @@ if($ARGV[0] =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3}):(\d+)$/) {
 }
 
 my $term = Term::ReadLine->new('SLDB Admin interface',\*STDIN,\*STDOUT);
+my $termReadLineImpl=$term->ReadLine();
+if($termReadLineImpl ne 'Term::ReadLine::Gnu') {
+  print "Unsupported ReadLine module \"$termReadLineImpl\" (only \"Term::ReadLine::Gnu\" is supported)\n";
+  print "You can either:\n";
+  print "- install the Term::ReadLine::Gnu Perl module\n";
+  print "- use netcat or telnet instead to connect directly to the SLDB admin interface\n";
+  exit 1;
+}
+
 $term->ornaments(0);
+
+my $histDir = first {defined $_ && -d $_} ($ENV{HOME},$ENV{USERPROFILE},catdir($FindBin::Bin,'var'));
+my $histFile;
+if(! defined $histDir) {
+  print "No suitable directory found for command history file, command history will NOT be persistent!\n";
+}else{
+  $histFile=catfile($histDir,'.sldbAdmin_history');
+  $term->ReadHistory($histFile);
+}
+
 my $r_termAttribs=$term->Attribs();
 $r_termAttribs->{completion_function} = sub {
   my ($text, $line, $start) = @_;
@@ -60,14 +86,6 @@ $r_termAttribs->{completion_function} = sub {
   }
 };
 
-if($term->ReadLine() eq 'Term::ReadLine::Stub') {
-  print "No suitable Term::ReadLine module found!\n";
-  print "You can either:\n";
-  print "- install a Perl ReadLine module such as Term::ReadLine::Gnu\n";
-  print "- use netcat or telnet instead to connect directly to the SLDB admin interface\n";
-  exit 1;
-}
-
 print "Connecting to $ipAddr:$port...\n";
 my $sldbSock = IO::Socket::INET->new(PeerHost => $ipAddr,
                                      PeerPort => $port,
@@ -76,7 +94,7 @@ my $sldbSock = IO::Socket::INET->new(PeerHost => $ipAddr,
     or die "Unable to connect to SLDB admin interface ($@)\n";
 print "Connected to SLDB admin interface (use Ctrl-d to quit, !help for list of commands)\n";
 print "-------------------------------------------------------------------------------\n";
-my ($sentTs,$receivedTs)=(time,time);
+my ($sentTs,$receivedTs,$histStifleTs)=(time,time,time);
 
 my $running=1;
 $term->event_loop(
@@ -101,15 +119,19 @@ $term->event_loop(
           $receivedTs=time;
           print $readData unless($readData =~ /^!#pong$/);
         }
-      }elsif(time - $receivedTs > 40) {
+      }elsif(time - $receivedTs > $CONN_TIMEOUT) {
         print "-------------------------------------------------------------------------------\n";
         print "Timeout on SLDB admin interface.\n";
         print "Press enter to exit...";
         $running=0;
       }
-      if($running && (time - $sentTs > 15)) {
+      if($running && (time - $sentTs > $CONN_PING_DELAY)) {
         print $sldbSock "!#ping\n";
         $sentTs=time;
+      }
+      if(time - $histStifleTs > $HIST_STIFLE_DELAY) {
+        $term->StifleHistory($HIST_SIZE);
+        $histStifleTs=time;
       }
     }
     if(! $running) {
@@ -133,6 +155,12 @@ while (defined ($cmd = $term->readline(''))) {
     $sentTs=time;
   }
 }
+
+if(defined $histFile) {
+  $term->StifleHistory($HIST_SIZE);
+  $term->WriteHistory($histFile);
+}
+
 if($running) {
   shutdown($sldbSock,2);
   $sldbSock->close();

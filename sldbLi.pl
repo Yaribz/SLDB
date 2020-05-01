@@ -49,7 +49,7 @@ sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
 sub none (&@) { my $c = shift; return ! defined first {&$c} @_; }
 sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
-my $sldbLiVer='0.3';
+my $sldbLiVer='0.4';
 
 $SIG{CHLD} = \&sigChldHandler;
 $SIG{TERM} = \&sigTermHandler;
@@ -2465,7 +2465,7 @@ sub forkedOnlineReportGeneration {
 
 sub onlineReportComplete {
   my ($url,$orig,$userName,$mod,$exitCode)=@_;
-  if($lobbyState >= 4 && exists $lobby->{users}->{$orig}) {
+  if($lobbyState >= 4 && ($orig eq '*' || exists $lobby->{users}->{$orig})) {
     if($exitCode) {
       sayPrivate($orig,"Unable to generate online $mod TrueSkill graphs for $userName");
     }else{
