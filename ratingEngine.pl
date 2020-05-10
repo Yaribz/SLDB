@@ -21,7 +21,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.3 (2020/04/05)
+# Version 0.4 (2020/05/10)
 
 use strict;
 
@@ -1039,7 +1039,7 @@ if($running) {
   }else{
     slog('Process running since '.secToTime($conf{maxRunTime}).', restarting',3);
   }
-  exec($0);
+  exec {$^X} ($^X,$0,@ARGV);
 }else{
   slog("Exiting.",3);
 }
