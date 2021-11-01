@@ -1,7 +1,7 @@
 # Perl module implementing the SLDB data model.
 # This file is part of SLDB.
 #
-# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2021  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,11 +22,21 @@ package Sldb;
 use strict;
 
 use DBI;
+use File::Basename 'dirname';
+use File::Spec::Functions qw'catfile rel2abs';
 use Time::HiRes;
 
+use SimpleConf;
 use SimpleLog;
 
-my $moduleVersion='0.4';
+my $scriptDir=dirname(rel2abs($0));
+my $confFile=catfile($scriptDir,'etc','sldb.conf');
+
+my %conf=(defaultPref => { ircColors => 1,
+                           privacyMode => 1 } );
+SimpleConf::readConf($confFile,\%conf) if(-f $confFile);
+
+my $moduleVersion='0.5';
 
 my %ADMIN_EVT_TYPE=('UPD_USERDETAILS' => 0,
                     'JOIN_ACC' => 1,
@@ -56,8 +66,8 @@ my %gameTypeMapping=('Duel' => 'Duel',
                      'TeamFFA' => 'TeamFfa',
                      'Global' => '');
 
-my %ACCOUNTS_PREF=( ircColors => ['[01]',1] );
-my %USERS_PREF=( privacyMode => ['[012]',1] );
+my %ACCOUNTS_PREF=( ircColors => ['[01]',$conf{defaultPref}{ircColors}] );
+my %USERS_PREF=( privacyMode => ['[012]',$conf{defaultPref}{privacyMode}] );
 
 my $chartClickerUnavailable;
 
