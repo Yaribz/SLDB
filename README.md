@@ -62,6 +62,8 @@ you plan to use this script for your backups:
 
 Additionally, some SLDB components require some standard but non-core Perl
 modules to be available on the system (easily installable through CPAN):
+* all components require the "DBI" Perl module
+* sldbSetup requires the "Term::UI" Perl module
 * ratingEngine requires the "Inline::Python" Perl module
 * xmlRpc requires the "RPC::XML::Server" Perl module ("Net::Server::PreFork" is
   also highly recommended)
