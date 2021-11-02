@@ -1,6 +1,10 @@
 [adminEvents]
-!adminEvents [<maxAge> [<typeFilter> [<subTypeFilter> [<origFilter> [<origIdFilter>]]]]] - lists recent admin events (default <maxAge> is 7d), with optional filters [alias: !ae]
-"!adminEvents 1y JOIN_ACC * 1" shows all admin events of type "JOIN_ACC" that occured over the past year, with any subType and orig=1
+!adminEvents [<filterName1>=<filterValue1> [<filterName2>=<filterValue2> [...]]] - lists recent admin events with optional filters (default maxAge is "1w" = 1 week) [alias: !ae]
+"!adminEvents maxAge=1y type=JOIN_ACC" shows all admin events of type "JOIN_ACC" that occured over the past year
+"!adminEvents type=ADD_NOT_SMURF subType=3" shows all admin events of type "ADD_NOT_SMURF" with subType=3 (manual removal of a probable smurf entry) that occured over the last week
+"!adminEvents orig=admin maxAge=1d" shows all admin events manually triggered by admins that occured over the last 24 hours
+"!adminEvents origId=1234 maxAge=2w" shows all admin events manually triggered by the admin whose account ID is 1234 that occured over last 2 weeks
+"!adminEvents accountId=5678 maxAge=2h" shows all admin events related to accountId 5678 that occured over the last 2 hours
 
 [banList]
 !banList [<banListName> create|delete|add|remove [<userName>|#<userId>]] - lists and edit ban lists [alias: !bl]

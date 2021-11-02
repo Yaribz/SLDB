@@ -8,7 +8,7 @@
 # - offer basic ranking data to players and advanced ranking data to SLDB admins
 # - allow SLDB admins to manage SLDB user data manually
 #
-# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2021  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use POSIX (':sys_wait_h','ceil');
 
 use FindBin;
 use IO::Select;
-use List::Util 'first';
+use List::Util qw'any all none notall';
 use Storable qw'nstore retrieve';
 use Text::ParseWords;
 
@@ -44,12 +44,7 @@ use SpringLobbyInterface;
 eval "use IpWhois";
 my $ipWhoisModuleUnavailable=$@;
 
-sub any (&@) { my $c = shift; return defined first {&$c} @_; }
-sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
-sub none (&@) { my $c = shift; return ! defined first {&$c} @_; }
-sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
-
-my $sldbLiVer='0.4';
+my $sldbLiVer='0.5';
 
 $SIG{CHLD} = \&sigChldHandler;
 $SIG{TERM} = \&sigTermHandler;
@@ -930,49 +925,58 @@ sub enforceHostBans {
 
 sub hAdminEvents {
   my (undef,$user,$p_params)=@_;
-  my ($maxAge,$typeFilter,$subTypeFilter,$origFilter,$origIdFilter)=@{$p_params};
-  $maxAge='1w' unless(defined $maxAge);
-  $maxAge=convertDuration($maxAge);
-  if($maxAge !~ /^\d+$/) {
-    invalidSyntax($user,'adminevents','invalid maxAge value');
-    return 0;
-  }
-  $maxAge=time-(60*$maxAge);
 
+  my $maxAge;
+  my %filters;
+
+  my %origReverseMapping=(auto => 0, admin => 1, user => 2);
+  
+  foreach my $param (@{$p_params}) {
+    if($param =~ /^([^=]+)=(.*)$/) {
+      my ($filterName,$filterValue)=($1,$2);
+      if(none {$filterName eq $_} (qw'maxAge type subType orig origId accountId')) {
+        invalidSyntax($user,'adminevents',"invalid filter \"$filterName\"");
+        return 0;
+      }
+      if($filterName eq 'maxAge') {
+        $filterValue=convertDuration($filterValue);
+      }elsif($filterName eq 'type') {
+        $filterValue=$ADMIN_EVT_TYPE{$filterValue} if(exists $ADMIN_EVT_TYPE{$filterValue});
+      }elsif($filterName eq 'orig') {
+        $filterValue=$origReverseMapping{$filterValue} if(exists $origReverseMapping{$filterValue});
+      }
+      if($filterValue !~ /^\d+$/) {
+        invalidSyntax($user,'adminevents',"invalid \"$filterName\" filter value");
+        return 0;
+      }
+      if($filterName eq 'maxAge') {
+        $maxAge=$filterValue;
+      }else{
+        $filters{$filterName}=$filterValue;
+      }
+    }else{
+      invalidSyntax($user,'adminevents');
+      return 0;
+    }
+  }
+
+  $maxAge//=convertDuration('1w');
+  $maxAge=time-(60*$maxAge);
+  
   my ($p_C,$B)=initUserIrcColors($user);
   my %C=%{$p_C};
   
-  my $sql="select eventId,date,orig,message from adminEvents where date >= FROM_UNIXTIME($maxAge)";
-  if(defined $typeFilter && $typeFilter ne '*') {
-    $typeFilter=$ADMIN_EVT_TYPE{$typeFilter} if(exists $ADMIN_EVT_TYPE{$typeFilter});
-    if($typeFilter !~ /^\d+$/) {
-      invalidSyntax($user,'adminevents','invalid typeFilter value');
-      return 0;
+  my $sql="select ae.eventId,ae.date,ae.orig,ae.message from adminEvents ae,adminEventsParams aep where ae.eventId=aep.eventId and ae.date >= FROM_UNIXTIME($maxAge)";
+
+  foreach my $filterName (keys %filters) {
+    my $filterValue=$filters{$filterName};
+    if($filterName eq 'accountId') {
+      $sql.=" and (ae.origId=$filterValue or aep.paramValue=$filterValue)";
+    }else{
+      $sql.=" and ae.$filterName=$filterValue";
     }
-    $sql.=" and type=$typeFilter";
   }
-  if(defined $subTypeFilter && $subTypeFilter ne '*') {
-    if($subTypeFilter !~ /^\d+$/) {
-      invalidSyntax($user,'adminevents','invalid subTypeFilter value');
-      return 0;
-    }
-    $sql.=" and subType=$subTypeFilter";
-  }
-  if(defined $origFilter && $origFilter ne '*') {
-    if($origFilter !~ /^\d+$/) {
-      invalidSyntax($user,'adminevents','invalid origFilter value');
-      return 0;
-    }
-    $sql.=" and orig=$origFilter";
-  }
-  if(defined $origIdFilter) {
-    if($origIdFilter !~ /^\d+$/) {
-      invalidSyntax($user,'adminevents','invalid origIdFilter value');
-      return 0;
-    }
-    $sql.=" and origId=$origIdFilter";
-  }
-  $sql.=' order by date desc limit 100';
+  $sql.=' group by ae.eventId order by ae.date desc limit 200';
 
   my %origMapping=( 0 => "$C{14}auto",
                     1 => "$C{4}admin",
@@ -990,7 +994,7 @@ sub hAdminEvents {
     foreach my $resultLine (@{$p_resultLines}) {
       sayPrivate($user,$resultLine);
     }
-    sayPrivate($user,"$C{4}Result truncated to first 100 entries.") if($#resultData == 99);
+    sayPrivate($user,"$C{4}Result truncated to first 200 entries.") if(@resultData == 200);
   }else{
     answer("No matching admin event found.");
   }
