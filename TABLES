@@ -37,7 +37,7 @@ Parameterization table: (filled manually by SLDB admin)
 ======================
   gamesNames: name, shortName, regex, testRegex, chickenRegex
 
-Rating tables: (filled/updated by ratingEngine, but tsRatingQueue and tsRerateAccounts are also filled by slMonitor, zkMonitor and sldbLi to queue (re)rate operations)
+Rating tables: (filled/updated by ratingEngine, but tsRatingQueue and rerateRequests are also filled by slMonitor, zkMonitor and sldbLi to queue (re)rate operations)
 =============
   ts{Duel|Ffa|Team|TeamFFa|""}Games: gameId, accountId, userId, modShortName, gdrTimestamp, muBefore, sigmaBefore, muAfter, sigmaAfter
   ts{Duel|Ffa|Team|TeamFfa|""}Players: period, userId, modShortName, skill, mu, sigma, nbPenalties
@@ -45,7 +45,8 @@ Rating tables: (filled/updated by ratingEngine, but tsRatingQueue and tsRerateAc
     (param values: "currentRatingYear", "currentRatingMonth", "batchRatingStatus")
   tsRatingQueue: gameId, gdrTimestamp, status
     (status values: 0: queued, 1: in progress, 2: duplicate, 3: error/unratable, 4: error/gdrTimestampFormat, 5: error/inconsistentGdrTimestamp, 6: undecided game, 7: cheating game)
-  tsRerateAccounts: accountId, accountTimestamp
+  rerateRequests: type, id, startPeriod, status, requestTimestamp
+  pendingRerates: modShortName, startPeriod, requestTimestamp
 
 Preference tables: (filled/updated by sldbLi and xmlRpc)
 =================

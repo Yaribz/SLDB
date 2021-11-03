@@ -36,7 +36,7 @@ my %conf=(defaultPref => { ircColors => 1,
                            privacyMode => 1 } );
 SimpleConf::readConf($confFile,\%conf) if(-f $confFile);
 
-my $moduleVersion='0.5';
+my $moduleVersion='0.6';
 
 my %ADMIN_EVT_TYPE=('UPD_USERDETAILS' => 0,
                     'JOIN_ACC' => 1,
@@ -543,10 +543,21 @@ create table if not exists tsRatingState (
 ) engine=MyISAM','create table "tsRatingState"');
 
   $self->do('
-create table if not exists tsRerateAccounts (
-  accountId int unsigned primary key,
-  accountTimestamp Timestamp
-) engine=MyISAM','create table "tsRerateAccounts"');
+create table if not exists rerateRequests (
+  type char(1),
+  id char(32),
+  startPeriod int unsigned,
+  status tinyint(1),
+  requestTimestamp Timestamp default 0,
+  primary key (type,id,status)
+) engine=MyISAM','create table "rerateRequests"');
+
+  $self->do('
+create table if not exists pendingRerates (
+  modShortName char(8) primary key,
+  startPeriod int unsigned,
+  requestTimestamp Timestamp default 0
+) engine=MyISAM','create table "pendingRerates"');
 
   $self->do('
 create table if not exists prefAccounts (
@@ -1072,11 +1083,38 @@ sub getLatestRatedGameId {
   return '';
 }
 
+# Called by sldbLi.pl
+sub isKnownGameId {
+  my ($self,$gameId)=@_;
+  my $quotedGameId=$self->quote($gameId);
+  my $sth=$self->prepExec("select count(*) from games where gameId=$quotedGameId");
+  my @foundData=$sth->fetchrow_array();
+  return 1 if($foundData[0] > 0);
+  return 0;
+}
+
 # Called by sldbLi.pl, slMonitor.pl
 sub queueGlobalRerate {
   my ($self,$accountId)=@_;
-  $self->log("Queuing a global rerate for account $accountId",3);
-  $self->do("insert into tsRerateAccounts values ($accountId,now()) on duplicate key update accountTimestamp=now()","add account \"$accountId\" in tsRerateAccounts table");
+  $self->log("Queuing a global rerate request for account $accountId",3);
+  my $quotedAccountId=$self->quote($accountId);
+  $self->do("insert into rerateRequests values ('A',$quotedAccountId,0,0,now()) on duplicate key update requestTimestamp=now()","add account \"$accountId\" in rerateRequests table");
+}
+
+# Called by sldbLi.pl
+sub queueMatchRerate {
+  my ($self,$gameId)=@_;
+  $self->log("Queuing a global rerate request for match $gameId",3);
+  my $quotedGameId=$self->quote($gameId);
+  $self->do("insert into rerateRequests values ('M',$quotedGameId,0,0,now()) on duplicate key update requestTimestamp=now()","add match \"$gameId\" in rerateRequests table");
+}
+
+# Called by sldbLi.pl
+sub queueGameRerate {
+  my ($self,$modShortName,$startPeriod)=@_;
+  $self->log("Queuing a global rerate request for game $modShortName (start period: $startPeriod)",3);
+  my $quotedModShortName=$self->quote($modShortName);
+  $self->do("insert into rerateRequests values ('G',$quotedModShortName,$startPeriod,0,now()) on duplicate key update requestTimestamp=now(), startPeriod = LEAST($startPeriod,startPeriod)","add game \"$modShortName\" with start period \"$startPeriod\" in rerateRequests table");
 }
 
 # Called by sldbLi.pl, xmlRpc.pl

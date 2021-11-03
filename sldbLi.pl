@@ -44,7 +44,7 @@ use SpringLobbyInterface;
 eval "use IpWhois";
 my $ipWhoisModuleUnavailable=$@;
 
-my $sldbLiVer='0.5';
+my $sldbLiVer='0.6';
 
 $SIG{CHLD} = \&sigChldHandler;
 $SIG{TERM} = \&sigTermHandler;
@@ -94,6 +94,7 @@ my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       quit => \&hQuit,
                       ranking => \&hRanking,
                       reloadconf => \&hReloadConf,
+                      rerate => \&hRerate,
                       restart => \&hRestart,
                       searchuser => \&hSearchUser,
                       sendlobby => \&hSendLobby,
@@ -2003,6 +2004,79 @@ sub hReloadConf {
   %conf=%{$botConf->{conf}};
 
   answer('SldbLi configuration reloaded');
+}
+
+sub hRerate {
+  my ($source,$user,$r_params)=@_;
+
+  my $nbParams=@{$r_params};
+  if($nbParams < 1 || $nbParams > 2) {
+    invalidSyntax($user,'rerate');
+    return 0;
+  }
+  
+  my $id=$r_params->[0];
+  if(lc($id) eq 'now') {
+    if($nbParams > 1) {
+      invalidSyntax($user,'rerate');
+      return 0;
+    }
+    my $sth=$sldb->prepExec('select count(*) from pendingRerates where requestTimestamp != 0','check for any pending rerate scheduled for delayed processing');
+    my @results=$sth->fetchrow_array();
+    if($results[0] > 0) {
+      $sldb->do('update pendingRerates set requestTimestamp=0','update pendingRerates table to force immediate processing of pending rerates');
+      answer("Forced immediate execution of $results[0] pending rerate".($results[0] > 1 ? 's' : ''));
+      return 1;
+    }else{
+      answer('Unable to force immediate execution of pending rerates: no pending rerate found');
+      return 0;
+    }
+  }
+
+  if($id =~ /^#(\d{1,10})$/) {
+    my $accountId=$1;
+    if($nbParams > 1 || $accountId >= 2**32) {
+      invalidSyntax($user,'rerate');
+      return 0;
+    }
+    $sldb->queueGlobalRerate($accountId);
+    answer("Scheduled global rerate for account ID $accountId");
+    return 1;
+  }
+
+  my @modsToRerate;
+  if($id eq '*') {
+    my $r_allowedMods=$sldb->getModsShortNames();
+    @modsToRerate=@{$r_allowedMods};
+  }else{
+    my $fixedModShortName=$sldb->fixModShortName($id);
+    @modsToRerate=($fixedModShortName) if(defined $fixedModShortName);
+  }
+  if(@modsToRerate) {
+    my $startPeriod=$r_params->[1]//0;
+    $startPeriod+=0;
+    if($startPeriod != 0 && ! ($startPeriod =~ /^\d{4}(\d\d)$/ && $1 > 0 && $1 < 13)) {
+      invalidSyntax($user,'rerate',"invalid rerate start period \"$startPeriod\"");
+      return 0;
+    }
+    foreach my $modShortName (@modsToRerate) {
+      $sldb->queueGameRerate($modShortName,$startPeriod);
+    }
+    answer('Scheduled global rerate for game'.(@modsToRerate>1?'s':'').' '.join(', ',@modsToRerate).($startPeriod ? " (start period: $startPeriod)" : ''));
+    return 1;
+  }
+
+  if($nbParams > 1 || ($id !~ /^[0-9a-f]{32}$/ && $id !~ /^zk\-\d{1,29}$/)) {
+    invalidSyntax($user,'rerate',"invalid game ID \"$id\"");
+    return 0;
+  }
+  if($sldb->isKnownGameId($id)) {
+    $sldb->queueMatchRerate($id);
+    answer("Scheduled global rerate for match with game ID \"$id\"");
+    return 1;
+  }
+  answer("Unable to schedule rerate for match with game ID \"$id\": unknown game ID");
+  return 0;
 }
 
 sub hRestart {

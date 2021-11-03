@@ -5,7 +5,7 @@
 # The rating engine is in charge of computing all games results to produce
 # players ranking data. It is based on TrueSkill(tm) ranking algorithm.
 #
-# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2021  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.4 (2020/05/10)
+# Version 0.5 (2021/11/03)
 
 use strict;
 
@@ -928,6 +928,66 @@ sub rateModFromMonth {
   }
 }
 
+sub processRerateRequest {
+  my ($type,$id,$startPeriod,$ts)=@{$_[0]};
+  my ($sth,$errMsg);
+  if($type eq 'A') {
+    if($id =~ /^\d+$/ && $id < 2**32) {
+      $sth=$sldb->prepExec("select YEAR(min(gdrTimestamp)),MONTH(min(gdrTimestamp)),modShortName from tsGames where accountId=$id group by modShortName","retrieve rerate games and start dates for account $id from tsGames table");
+      my $r_rerateDataArray=$sth->fetchall_arrayref();
+      if(@{$r_rerateDataArray}) {
+        my @rerateLogData;
+        foreach my $r_rerateData (@{$r_rerateDataArray}) {
+          my ($startYear,$startMonth,$modShortName)=@{$r_rerateData};
+          $startMonth=sprintf('%02d',$startMonth);
+          push(@rerateLogData,"$modShortName($startYear$startMonth)");
+          scheduleRerate($modShortName,$startYear.$startMonth,$ts);
+        }
+        slog("Global rerate scheduled for account $id: ".join(', ',@rerateLogData),3);
+      }else{
+        slog("Global rerate is not needed for account $id (no match rated yet for this account)",4);
+      }
+    }else{
+      $errMsg='invalid account ID';
+    }
+  }elsif($type eq 'M') {
+    if($id =~ /^[0-9a-f]{32}$/ || $id =~ /^zk\-\d{1,29}$/) {
+      my $quotedGameId=$sldb->quote($id);
+      $sth=$sldb->prepExec("select YEAR(gd.gdrTimestamp),MONTH(gd.gdrTimestamp),gn.shortName from games g,gamesDetails gd, gamesNames gn where g.gameId=$quotedGameId and gd.gameId=$quotedGameId and g.modName regexp gn.regex","retrieve rerate game and start date for match $id from tsGames table");
+      my ($startYear,$startMonth,$modShortName)=$sth->fetchrow_array();
+      if(defined $startYear) {
+        $startMonth=sprintf('%02d',$startMonth);
+        scheduleRerate($modShortName,$startYear.$startMonth,$ts);
+        slog("Global rerate scheduled for match $id: $modShortName($startYear$startMonth)",3);
+      }else{
+        slog("Ignoring invalid rerate request (type=$type, id=$id, startPeriod=$startPeriod, ts=$ts): unknown game ID or unratable game",2);
+      }
+    }else{
+      $errMsg='invalid game ID';
+    }
+  }elsif($type eq 'G') {
+    if($startPeriod == 0 || ($startPeriod =~ /^\d{4}(\d\d)$/ && $1 > 0 && $1 < 13)) {
+      scheduleRerate($id,$startPeriod,$ts);
+      if($startPeriod) {
+        slog("Global rerate scheduled for game $id (start period: $startPeriod)",3);
+      }else{
+        slog("Global rerate scheduled for game $id",3);
+      }
+    }else{
+      $errMsg='invalid start period';
+    }
+  }else{
+    $errMsg='invalid type';
+  }
+  slog("Ignoring invalid rerate request (type=$type, id=$id, startPeriod=$startPeriod, ts=$ts): $errMsg",1) if(defined $errMsg);
+}
+
+sub scheduleRerate {
+  my ($modShortName,$startPeriod,$ts)=@_;
+  my $quotedModShortName=$sldb->quote($modShortName);
+  $sldb->do("insert into pendingRerates values($quotedModShortName,$startPeriod,FROM_UNIXTIME($ts)) on duplicate key update requestTimestamp=FROM_UNIXTIME($ts), startPeriod = LEAST($startPeriod,startPeriod)");
+}
+
 slog("Checking rating database state",3);
 my $p_ratingState=$sldb->getRatingState();
 if(! exists $p_ratingState->{currentRatingMonth}) {  
@@ -953,63 +1013,74 @@ if(! exists $p_ratingState->{currentRatingMonth}) {
 $currentRatingMonth=sprintf('%02d',$currentRatingMonth);
 createPartitionsIfNeeded($currentRatingYear.$currentRatingMonth);
 
-my $rerateTs=0;
+my $rerateTs=-1;
+
 slog("Starting rating queues polling...",3);
 while($running && time < $running) {
-  my $sth=$sldb->prepExec("select accountId,UNIX_TIMESTAMP(accountTimestamp) from tsRerateAccounts where accountTimestamp > FROM_UNIXTIME($rerateTs)",'check for new accounts to rerate');
-  my $p_accountsToRerate=$sth->fetchall_arrayref();
-  if(@{$p_accountsToRerate}) {
-    slog("Found potential accounts to rerate, checking for unneeded rerates...",4);
-    my $newRerateTs=0;
-    foreach my $p_accountToRerate (@{$p_accountsToRerate}) {
-      my ($accountId,$accountTs)=($p_accountToRerate->[0],$p_accountToRerate->[1]);
-      $sth=$sldb->prepExec("select count(*) from tsGames where accountId=$accountId","check if account $accountId has already been rated in tsGames table");
-      my @countRes=$sth->fetchrow_array();
-      error("Unable to query table tsGames to check for unneeded global rerate for account $accountId") unless(@countRes);
-      if($countRes[0] == 0) {
-        slog("Global rerate is not needed for account $accountId (no game rated yet for this account)",4);
-        $sldb->do("delete from tsRerateAccounts where accountId=$accountId","remove unneeded global rerate for account $accountId from tsRerateAccounts table");
-      }else{
-        $newRerateTs=$accountTs if($newRerateTs < $accountTs);
-      }
+  my $sth=$sldb->prepExec('select type,id,startPeriod,UNIX_TIMESTAMP(requestTimestamp) from rerateRequests where status=1','check for unexpected rerate requests already marked as being processed');
+  my $r_inconsistentRerateRequests=$sth->fetchall_arrayref();
+  if(@{$r_inconsistentRerateRequests}) {
+    slog('Found unexpected rerate requests already marked as being processed, processing them...',2);
+    foreach my $r_rerateRequest (@{$r_inconsistentRerateRequests}) {
+      processRerateRequest($r_rerateRequest);
     }
-    if($newRerateTs) {
-      if($rerateTs < $newRerateTs) {
-        $rerateTs=$newRerateTs;
-        my $rerateScheduleTime=$rerateTs+$conf{rerateDelay};
-        if(time >= $rerateScheduleTime) {
-          $rerateScheduleTime='now!';
-        }else{
-          $rerateScheduleTime='in '.secToTime($rerateScheduleTime - time);
-        }
-        slog("Found new accounts to rerate, global rerate scheduled $rerateScheduleTime",3);
-      }else{
-        slog('Inconsistent state: found new rerate accounts which should have been treated before? cancelling global rerate to start over check algorithm!',2);
-        $rerateTs=0;
-      }
-    }
+    $sldb->do('delete from rerateRequests where status=1','remove unexpected rerate requests already marked as being processed from rerateRequests table');
   }
-  if($rerateTs && time >= $rerateTs+$conf{rerateDelay}) {
+  $sldb->do('update rerateRequests set status=1','update rerateRequests table to mark rerate requests as being processed');
+  $sth=$sldb->prepExec('select type,id,startPeriod,UNIX_TIMESTAMP(requestTimestamp) from rerateRequests where status=1','check for pending rerate requests');
+  my $r_pendingRerateRequests=$sth->fetchall_arrayref();
+  if(@{$r_pendingRerateRequests}) {
+    slog('Found rerate request(s), processing them...',4);
+    foreach my $r_rerateRequest (@{$r_pendingRerateRequests}) {
+      processRerateRequest($r_rerateRequest);
+    }
+    $sldb->do('delete from rerateRequests where status=1','remove processed rerate requests from rerateRequests table');
+  }
+  $sth=$sldb->prepExec('select max(UNIX_TIMESTAMP(requestTimestamp)) from pendingRerates','check for new pending rerates');
+  my @res=$sth->fetchrow_array();
+  if(! defined $res[0]) {
+    if($rerateTs != -1) {
+      slog('Pending rerates found previously have been removed from database without being processed !',2);
+      $rerateTs=-1;
+    }
+  }else{
+    my $newRerateTs=$res[0];
+    my $scheduledRerateTs=$newRerateTs+$conf{rerateDelay};
+    if($newRerateTs < $rerateTs) {
+      if(time >= $scheduledRerateTs) {
+        slog('Pending rerates have been rescheduled for immediate execution',3);
+      }else{
+        slog('Pending rerates have been rescheduled for execution in '.secToTime($scheduledRerateTs-time),3);
+      }
+    }elsif($newRerateTs > $rerateTs) {
+      if(time >= $scheduledRerateTs) {
+        slog('New pending rerates found, global rerate scheduled for immediate execution',3);
+      }else{
+        slog('New pending rerates found, global rerate scheduled for execution in '.secToTime($scheduledRerateTs-time),3);
+      }
+    }
+    $rerateTs=$newRerateTs;
+  }
+  if($rerateTs > -1 && time >= $rerateTs+$conf{rerateDelay}) {
     slog("Starting global rerate process, checking mods to rerate...",3);
-    $rerateTs=0;
-    $sth=$sldb->prepExec("select YEAR(min(tsg.gdrTimestamp)),MONTH(min(tsg.gdrTimestamp)),tsg.modShortName from tsGames tsg,tsRerateAccounts tsra where tsg.accountId=tsra.accountId group by tsg.modShortName",'retrieve rerate start date from tsGames and tsRerateAccounts tables');
+    $rerateTs=-1;
+    $sth=$sldb->prepExec('select modShortName,startPeriod from pendingRerates','retrieve pending rerate data from pendingRerates table');
     my %rerateYearMonthByMod;
-    my @rerateTimeData;
-    while(@rerateTimeData=$sth->fetchrow_array()) {
-      $rerateYearMonthByMod{$rerateTimeData[2]}={year => $rerateTimeData[0], month => $rerateTimeData[1]};
+    while(my ($modShortName,$startPeriod)=$sth->fetchrow_array()) {
+      $rerateYearMonthByMod{$modShortName}={year => substr($startPeriod,0,4), month => substr($startPeriod,4,2)};
     }
     if(! %rerateYearMonthByMod) {
-      slog('Unable to find any rerate start date, cancelling global rerate!',1);
+      slog('Unable to find any pending rerate data, cancelling global rerate!',1);
     }else{
-      $sldb->do("truncate table tsRerateAccounts");
+      $sldb->do('truncate table pendingRerates','flush pendingRerates table');
       my @modsStartDates;
       foreach my $modShortName (keys %rerateYearMonthByMod) {
-        push(@modsStartDates,"$modShortName (since $rerateYearMonthByMod{$modShortName}->{year}-$rerateYearMonthByMod{$modShortName}->{month})");
+        push(@modsStartDates,"$modShortName (since $rerateYearMonthByMod{$modShortName}{year}-$rerateYearMonthByMod{$modShortName}{month})");
       }
       slog('Start of batch rating, rerate queue: '.join(', ',@modsStartDates),3);
       $sldb->do("insert into tsRatingState values('batchRatingStatus',1) on duplicate key update value=1",'update batchRatingStatus parameter to 1 in tsRatingState table');
       foreach my $modShortName (keys %rerateYearMonthByMod) {
-        my ($rerateYear,$rerateMonth)=($rerateYearMonthByMod{$modShortName}->{year},$rerateYearMonthByMod{$modShortName}->{month});
+        my ($rerateYear,$rerateMonth)=($rerateYearMonthByMod{$modShortName}{year},$rerateYearMonthByMod{$modShortName}{month});
         if($rerateYear > $currentRatingYear || ($rerateYear == $currentRatingYear && $rerateMonth > $currentRatingMonth)) {
           slog("Rerate start date \"$rerateYear-$rerateMonth\" is a future date, cancelling global rerate for $modShortName!",1);
         }else{
