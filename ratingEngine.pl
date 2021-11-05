@@ -21,7 +21,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.5 (2021/11/03)
+# Version 0.6 (2021/11/05)
 
 use strict;
 
@@ -29,6 +29,7 @@ use File::Basename qw/dirname fileparse/;
 use File::Spec::Functions qw/catfile file_name_is_absolute rel2abs/;
 use File::Path;
 use Time::HiRes;
+use Time::Local 'timelocal';
 
 my ($scriptBaseName,$scriptDir)=fileparse(rel2abs($0),'.pl');
 unshift(@INC,$scriptDir);
@@ -65,7 +66,8 @@ my %conf=(logLevel => 4,
                                 muPenalty => 0.03,
                                 sigmaPenalty => 0.01},
           rerateDelay => 1800,
-          maxRunTime => 86400
+          maxRunTime => 86400,
+          startSkills => ''
     );
 SimpleConf::readConf($confFile,\%conf);
 
@@ -75,15 +77,6 @@ mkpath(dirname($logFile));
 
 my $dbDs=$conf{dbName};
 $dbDs="DBI:mysql:database=$dbDs;host=localhost" unless($dbDs =~ /^DBI:/i);
-
-my %rankInitSkills=(0 => 20,
-                    1 => 22,
-                    2 => 23,
-                    3 => 24,
-                    4 => 25,
-                    5 => 26,
-                    6 => 28,
-                    7 => 30);
 
 my $sLog=SimpleLog->new(logFiles => [$logFile,''],
                         logLevels => [$conf{logLevel},3],
@@ -128,6 +121,33 @@ sub error {
   my $m=shift;
   slog($m,0);
   exit 1;
+}
+
+my %startSkills;
+{
+  my $remainingStartSkills=$conf{startSkills};
+  while($remainingStartSkills !~ /^\s*$/) {
+    if($remainingStartSkills =~ /^\s*([^\(\s]{1,8})\s*\(\s*([^\)]+)\)\s*,?\s*(.*)$/) {
+      my ($modShortName,$modStartSkills);
+      ($modShortName,$modStartSkills,$remainingStartSkills)=($1,$2,$3);
+      error("Invalid startSkills configuration value \"$conf{startSkills}\": duplicate declaration for $modShortName") if(exists $startSkills{$modShortName});
+      my @dataPointStrings=split(/,/,$modStartSkills);
+      my %modDataPoints;
+      foreach my $dataPoint (@dataPointStrings) {
+        if($dataPoint =~ /^\s*(\d{4})-(\d\d)-(\d\d)\s*(?:\[(\d+(?:\.\d+)?)\])?\s*$/) {
+          my ($year,$month,$day,$startSkill)=($1,$2,$3,$4//$conf{trueskillMu});
+          my $dataPointTs=timelocal(0,0,0,$day,$month-1,$year);
+          error("Invalid startSkills configuration value \"$conf{startSkills}\": duplicate declaration for $modShortName($dataPointTs)") if(exists $modDataPoints{$dataPointTs});
+          $modDataPoints{$dataPointTs}=$startSkill;
+        }else{
+          error("Invalid startSkills configuration value \"$conf{startSkills}\": invalid data \"$dataPoint\" for game $modShortName");
+        }
+      }
+      $startSkills{$modShortName}=[map {[$_,$modDataPoints{$_}]} (sort keys %modDataPoints)];
+    }else{
+      error("Invalid startSkills configuration value \"$conf{startSkills}\"");
+    }
+  }
 }
 
 my $sldb=Sldb->new({dbDs => $dbDs,
@@ -189,14 +209,27 @@ sub nextYearMonth {
   return ($year,$month);
 }
 
+sub getDefaultStartSkill {
+  my ($modShortName,$gdrTimestampTs)=@_;
+  return undef unless(exists $startSkills{$modShortName});
+  return $startSkills{$modShortName}[0][1] if($gdrTimestampTs <= $startSkills{$modShortName}[0][0]);
+  return $startSkills{$modShortName}[-1][1] if($gdrTimestampTs >= $startSkills{$modShortName}[-1][0]);
+  my $idx=0;
+  while($gdrTimestampTs > $startSkills{$modShortName}[$idx+1][0]) {
+    $idx++;
+  }
+  my ($x1,$x2,$y1,$y2)=($startSkills{$modShortName}[$idx][0],$startSkills{$modShortName}[$idx+1][0],$startSkills{$modShortName}[$idx][1],$startSkills{$modShortName}[$idx+1][1]);
+  return sprintf('%.4f',$y1+($gdrTimestampTs-$x1)*($y2-$y1)/($x2-$x1))+0;
+}
+
 sub newRatings {
-  my $rank=shift;
-  if(defined $rank) {
-    return {global => new Rating($rankInitSkills{$rank}),
-            duel => new Rating($rankInitSkills{$rank}),
-            ffa => new Rating($rankInitSkills{$rank}),
-            team => new Rating($rankInitSkills{$rank}),
-            teamFfa => new Rating($rankInitSkills{$rank})};
+  my $startSkill=shift;
+  if(defined $startSkill) {
+    return {global => new Rating($startSkill),
+            duel => new Rating($startSkill),
+            ffa => new Rating($startSkill),
+            team => new Rating($startSkill),
+            teamFfa => new Rating($startSkill)};
   }else{
     return {global => new Rating,
             duel => new Rating,
@@ -246,14 +279,14 @@ sub rateNewGame {
     return;
   }
 
-  $sth=$sldb->prepExec("select gd.gdrTimestamp,gd.type,gn.shortName,gd.undecided,gd.cheating from games g,gamesDetails gd, gamesNames gn where g.gameId=$quotedGameId and gd.gameId=$quotedGameId and g.modName regexp gn.regex","retrieve information for rating of game \"$gameId\"");
+  $sth=$sldb->prepExec("select gd.gdrTimestamp,gd.type,gn.shortName,gd.undecided,gd.cheating,UNIX_TIMESTAMP(gd.gdrTimestamp) from games g,gamesDetails gd, gamesNames gn where g.gameId=$quotedGameId and gd.gameId=$quotedGameId and g.modName regexp gn.regex","retrieve information for rating of game \"$gameId\"");
   my @gameData=$sth->fetchrow_array();
   if(! @gameData) {
     slog("Ignoring rating request of game \"$gameId\" (unknown game)",2);
     $sldb->do("update tsRatingQueue set status=3 where gameId=$quotedGameId","update tsRatingQueue table for rating error of game \"$gameId\"");
     return;
   }
-  my ($gdrTimestamp,$gameType,$modShortName,$undecided,$cheating)=@gameData;
+  my ($gdrTimestamp,$gameType,$modShortName,$undecided,$cheating,$gdrTimestampTs)=@gameData;
   if($undecided) {
     slog("Ignoring rating request of game \"$gameId\" (undecided game)",2);
     $sldb->do("update tsRatingQueue set status=6 where gameId=$quotedGameId","update tsRatingQueue table for rating error of game \"$gameId\"");
@@ -319,7 +352,7 @@ sub rateNewGame {
   $preRatingTime=int((Time::HiRes::time-$preRatingTime)*1000);
 
   my $calculationTime=Time::HiRes::time;
-  rateGameBatch(\%ratings,$gameId,$gdrTimestamp,$gameType,$modShortName);
+  rateGameBatch(\%ratings,$gameId,$gdrTimestamp,$gameType,$modShortName,$gdrTimestampTs);
   $calculationTime=int((Time::HiRes::time-$calculationTime)*1000);
 
   my $postRatingTime=Time::HiRes::time;
@@ -344,7 +377,7 @@ sub rateNewGame {
 }
 
 sub rateGameBatch {
-  my ($p_ratings,$gameId,$gdrTimestamp,$gameType,$modShortName)=@_;
+  my ($p_ratings,$gameId,$gdrTimestamp,$gameType,$modShortName,$gdrTimestampTs)=@_;
   my ($quotedGameId,$quotedModShortName)=$sldb->quote($gameId,$modShortName);
   
   my %userAccounts;
@@ -353,6 +386,8 @@ sub rateGameBatch {
   my @playersData;
   my $sth;
 
+  my $defaultStartSkill=getDefaultStartSkill($modShortName,$gdrTimestampTs);
+  
   if($gameType eq 'Duel') {
 
     $sth=$sldb->prepExec("select pd.accountId,userId,win from playersDetails pd,userAccounts ua where pd.gameId=$quotedGameId and pd.accountId=ua.accountId and allyTeam is not null","extract player information from tables playersDetails and userAccounts for Duel game $gameId");
@@ -368,14 +403,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        my $sth2=$sldb->prepExec("select rank from accounts where id=$userId");
-        my @rankData=$sth2->fetchrow_array();
-        if(@rankData) {
-          $preGameRatings{$userId}=newRatings($rankData[0]);
-        }else{
-          slog("Rating a game with an unknown user \"$userId\" ($gameId)",2);
-          $preGameRatings{$userId}=newRatings();
-        }
+        $preGameRatings{$userId}=newRatings($defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       if($playersData[2]==1) {
@@ -422,14 +450,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        my $sth2=$sldb->prepExec("select rank from accounts where id=$userId");
-        my @rankData=$sth2->fetchrow_array();
-        if(@rankData) {
-          $preGameRatings{$userId}=newRatings($rankData[0]);
-        }else{
-          slog("Rating a game with an unknown user \"$userId\" ($gameId)",2);
-          $preGameRatings{$userId}=newRatings();
-        }
+        $preGameRatings{$userId}=newRatings($defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       if($playersData[2]==1) {
@@ -500,14 +521,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        my $sth2=$sldb->prepExec("select rank from accounts where id=$userId");
-        my @rankData=$sth2->fetchrow_array();
-        if(@rankData) {
-          $preGameRatings{$userId}=newRatings($rankData[0]);
-        }else{
-          slog("Rating a game with an unknown user \"$userId\" ($gameId)",2);
-          $preGameRatings{$userId}=newRatings();
-        }
+        $preGameRatings{$userId}=newRatings($defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       my $teamNb=$playersData[2];
@@ -606,14 +620,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        my $sth2=$sldb->prepExec("select rank from accounts where id=$userId");
-        my @rankData=$sth2->fetchrow_array();
-        if(@rankData) {
-          $preGameRatings{$userId}=newRatings($rankData[0]);
-        }else{
-          slog("Rating a game with an unknown user \"$userId\" ($gameId)",2);
-          $preGameRatings{$userId}=newRatings();
-        }
+        $preGameRatings{$userId}=newRatings($defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       my $teamNb=$playersData[2];
@@ -873,7 +880,7 @@ sub rateMonth {
     }
     $sldb->do("delete from ts${gameType}Games where modShortName=$quotedModShortName and gdrTimestamp >= '$rateYear-$rateMonth-01' and gdrTimestamp < '$nextYear-$nextMonth-01'","flush ts${gameType}Games table for $modShortName($rateYear-$rateMonth)");
   }
-  my $sth=$sldb->prepExec("select g.gameId,gd.gdrTimestamp,type from games g,gamesDetails gd,gamesNames gn where g.gameId=gd.gameId and gd.gdrTimestamp >= '$rateYear-$rateMonth-01' and gd.gdrTimestamp < '$nextYear-$nextMonth-01' and type != 'Solo' and bots = 0 and undecided = 0 and cheating = 0 and gn.shortName=$quotedModShortName and g.modName regexp gn.regex order by gd.gdrTimestamp,gd.gameId","extract games for month rating of $modShortName($rateYear-$rateMonth)");
+  my $sth=$sldb->prepExec("select g.gameId,gd.gdrTimestamp,type,UNIX_TIMESTAMP(gd.gdrTimestamp) from games g,gamesDetails gd,gamesNames gn where g.gameId=gd.gameId and gd.gdrTimestamp >= '$rateYear-$rateMonth-01' and gd.gdrTimestamp < '$nextYear-$nextMonth-01' and type != 'Solo' and bots = 0 and undecided = 0 and cheating = 0 and gn.shortName=$quotedModShortName and g.modName regexp gn.regex order by gd.gdrTimestamp,gd.gameId","extract games for month rating of $modShortName($rateYear-$rateMonth)");
 
   $preRatingTime=time-$preRatingTime;
   
@@ -881,7 +888,7 @@ sub rateMonth {
 
   my @gameData;
   while(@gameData=$sth->fetchrow_array()) {
-    rateGameBatch(\%ratings,$gameData[0],$gameData[1],$gameData[2],$modShortName);
+    rateGameBatch(\%ratings,$gameData[0],$gameData[1],$gameData[2],$modShortName,$gameData[3]);
   }
 
   $calculationTime=time-$calculationTime;
