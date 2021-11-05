@@ -225,9 +225,9 @@ sub getDefaultStartSkill {
 sub newRatings {
   my $startSkill=shift;
   if(defined $startSkill) {
-    return {global => new Rating($startSkill),
-            duel => new Rating($startSkill),
-            ffa => new Rating($startSkill),
+    return {global => new Rating,
+            duel => new Rating,
+            ffa => new Rating,
             team => new Rating($startSkill),
             teamFfa => new Rating($startSkill)};
   }else{
