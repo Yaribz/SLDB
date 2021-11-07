@@ -61,7 +61,7 @@
 !reloadConf - reloads configuration
 
 [rerate]
-!rerate now|#<accountId>|<gameId>|<modShortName> [<startPeriod>] - schedules rerates for an account (based on <accountId>), a match (based on <gameID>) or all the matches of a game (based on <modShortName>
+!rerate now|#<accountId>|<gameId>|<modShortName> [<startPeriod>] - schedules rerates for an account (based on <accountId>), a match (based on <gameID>) or all the matches of a game (based on <modShortName>)
 "!rerate #1234" schedules a global rerate starting at the first match involving account "1234" for each game
 "!rerate c2a7025070271778e22aa6b379b8f899" schedules a game rerate starting at match whose gameId is "c2a7025070271778e22aa6b379b8f899"
 "!rerate BA" schedules a game rerate for Balanced Annihilation
@@ -97,6 +97,18 @@
 !setName <oldName>|#<userId> <newName> - renames the user named <userName> or whose user ID is <userId> to <newName> [alias: !sn]
 "!setName smurf realName" renames the user "smurf" to "realName"
 "!setName #1234 joe" renames the user with user ID 1234 to "joe"
+
+[setStartSkill]
+!setStartSkill <accountName>|#<accountId> <modShortName> [<startSkillValue>] - (re)sets the Team start skill value for a specific account and game [alias: !sss]
+"!setStartSkill joe BA 30" sets the Team start skill value of the account "joe" for Balanced Annihilation to 30
+"!setStartSkill #12345 BA" resets the Team start skill value of the account #12345 for Balanced Annihilation to default value
+
+[showStartSkills]
+!showStartSkills [<accountName>|#<accountId>|* [<modShortName>]] - shows the Team start skill values configured (for the account and game if specified) [alias: !shss]
+"!showStartSkills joe" shows all the Team start skill values configured for the account "joe" (for all games)
+"!showStartSkills #12345 BA" shows the Team start skill value configured for the account #12345 for Balanced Annihilation
+"!showStartSkills * BA" shows all the Team start skill values configured for Balanced Annihilation (for all accounts)
+"!showStartSkills" shows all the Team start skill values configured (for all accounts and games)
 
 [skillGraph]
 !skillGraph <modShortName> [<name>|#<accountId>] - generates online TrueSkill graphs for current user or user identified by <name> or <accountId> if provided [alias: !sg]

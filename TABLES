@@ -37,7 +37,7 @@ Parameterization table: (filled manually by SLDB admin)
 ======================
   gamesNames: name, shortName, regex, testRegex, chickenRegex
 
-Rating tables: (filled/updated by ratingEngine, but tsRatingQueue and rerateRequests are also filled by slMonitor, zkMonitor and sldbLi to queue (re)rate operations)
+Rating tables: (filled/updated by ratingEngine, but tsRatingQueue and rerateRequests are also filled by slMonitor, zkMonitor and sldbLi to queue (re)rate operations; tsStartSkills is filled by sldbLi)
 =============
   ts{Duel|Ffa|Team|TeamFFa|""}Games: gameId, accountId, userId, modShortName, gdrTimestamp, muBefore, sigmaBefore, muAfter, sigmaAfter
   ts{Duel|Ffa|Team|TeamFfa|""}Players: period, userId, modShortName, skill, mu, sigma, nbPenalties
@@ -47,6 +47,7 @@ Rating tables: (filled/updated by ratingEngine, but tsRatingQueue and rerateRequ
     (status values: 0: queued, 1: in progress, 2: duplicate, 3: error/unratable, 4: error/gdrTimestampFormat, 5: error/inconsistentGdrTimestamp, 6: undecided game, 7: cheating game)
   rerateRequests: type, id, startPeriod, status, requestTimestamp
   pendingRerates: modShortName, startPeriod, requestTimestamp
+  tsStartSkills: accountId, modShortName, startSkill
 
 Preference tables: (filled/updated by sldbLi and xmlRpc)
 =================
@@ -108,3 +109,13 @@ ADD_NOT_SMURF(5) (add of a "not-smurf" entry)
 DEL_NOT_SMURF(6) (removal of a "not-smurf" entry)
   (orig:1, subType = orig of the smurfs entry)
   event params: accountId1, accountId2
+SET_STARTSKILL(7) (assignment of a start skill value to an account)
+  (subType:0 => new start skill value assigned to a main user account
+   subType:1 => new start skill value assigned to a secondary account
+   subType:2 => existing start skill value modified for a main user account
+   subType:3 => existing start skill value modified for a secondary account)
+  event params: accountId, modShortName, startSkill
+RESET_STARTSKILL(8) (reset of a start skill value of an account)
+  (subType:0 => start skill value reset for a main user account
+   subType:1 => start skill value reset for a secondary account)
+  event params: accountId, modShortName

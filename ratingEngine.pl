@@ -21,7 +21,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.6 (2021/11/05)
+# Version 0.7 (2021/11/07)
 
 use strict;
 
@@ -134,7 +134,7 @@ my %startSkills;
       my @dataPointStrings=split(/,/,$modStartSkills);
       my %modDataPoints;
       foreach my $dataPoint (@dataPointStrings) {
-        if($dataPoint =~ /^\s*(\d{4})-(\d\d)-(\d\d)\s*(?:\[(\d+(?:\.\d+)?)\])?\s*$/) {
+        if($dataPoint =~ /^\s*(\d{4})-(\d\d)-(\d\d)\s*(?:\[(\d{1,4})\])?\s*$/) {
           my ($year,$month,$day,$startSkill)=($1,$2,$3,$4//$conf{trueskillMu});
           my $dataPointTs=timelocal(0,0,0,$day,$month-1,$year);
           error("Invalid startSkills configuration value \"$conf{startSkills}\": duplicate declaration for $modShortName($dataPointTs)") if(exists $modDataPoints{$dataPointTs});
@@ -403,7 +403,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        $preGameRatings{$userId}=newRatings($defaultStartSkill);
+        $preGameRatings{$userId}=newRatings($sldb->getAccountEffectiveStartSkill($userId,$modShortName,1)//$defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       if($playersData[2]==1) {
@@ -450,7 +450,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        $preGameRatings{$userId}=newRatings($defaultStartSkill);
+        $preGameRatings{$userId}=newRatings($sldb->getAccountEffectiveStartSkill($userId,$modShortName,1)//$defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       if($playersData[2]==1) {
@@ -521,7 +521,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        $preGameRatings{$userId}=newRatings($defaultStartSkill);
+        $preGameRatings{$userId}=newRatings($sldb->getAccountEffectiveStartSkill($userId,$modShortName,1)//$defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       my $teamNb=$playersData[2];
@@ -620,7 +620,7 @@ sub rateGameBatch {
       if(exists $p_ratings->{$userId}) {
         $preGameRatings{$userId}=$p_ratings->{$userId};
       }else{
-        $preGameRatings{$userId}=newRatings($defaultStartSkill);
+        $preGameRatings{$userId}=newRatings($sldb->getAccountEffectiveStartSkill($userId,$modShortName,1)//$defaultStartSkill);
       }
       $postGameRatings{$userId}=copyRatings($preGameRatings{$userId});
       my $teamNb=$playersData[2];

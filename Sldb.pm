@@ -24,6 +24,7 @@ use strict;
 use DBI;
 use File::Basename 'dirname';
 use File::Spec::Functions qw'catfile rel2abs';
+use List::Util 'sum';
 use Time::HiRes;
 
 use SimpleConf;
@@ -36,7 +37,7 @@ my %conf=(defaultPref => { ircColors => 1,
                            privacyMode => 1 } );
 SimpleConf::readConf($confFile,\%conf) if(-f $confFile);
 
-my $moduleVersion='0.7';
+my $moduleVersion='0.8';
 
 my %ADMIN_EVT_TYPE=('UPD_USERDETAILS' => 0,
                     'JOIN_ACC' => 1,
@@ -44,21 +45,27 @@ my %ADMIN_EVT_TYPE=('UPD_USERDETAILS' => 0,
                     'ADD_PROB_SMURF' => 3,
                     'DEL_PROB_SMURF' => 4,
                     'ADD_NOT_SMURF' => 5,
-                    'DEL_NOT_SMURF' => 6);
+                    'DEL_NOT_SMURF' => 6,
+                    'SET_STARTSKILL' => 7,
+                    'RESET_STARTSKILL' => 8);
 my %ADMIN_EVT_PARAMS=(0 => [qw/updatedUserId updatedParam oldValue newValue/],
                       1 => [qw/mainUserId childUserId/],
                       2 => [qw/oldUserId newUserId accountId/],
                       3 => [qw/accountId1 accountId2/],
                       4 => [qw/accountId1 accountId2/],
                       5 => [qw/accountId1 accountId2/],
-                      6 => [qw/accountId1 accountId2/]);
+                      6 => [qw/accountId1 accountId2/],
+                      7 => [qw'accountId modShortName startSkill'],
+                      8 => [qw'accountId modShortName']);
 my %ADMIN_EVT_MSG=(0 => 'Update of setting "%updatedParam%" for user "%updatedUserId%": "%oldValue%" --> "%newValue%"',
                    1 => 'Join of account "%childUserId%" with user "%mainUserId%"',
                    2 => 'Split of account "%accountId%" and user "%oldUserId%" (new user: "%newUserId%")',
                    3 => 'New probable smurfs: "%accountId1%" <-> "%accountId2%"',
                    4 => 'Removal of probable smurfs: "%accountId1%" <-> "%accountId2%"',
                    5 => 'New not-smurfs record: "%accountId1%" <-> "%accountId2%"',
-                   6 => 'Removal of not-smurfs record: "%accountId1%" <-> "%accountId2%"');
+                   6 => 'Removal of not-smurfs record: "%accountId1%" <-> "%accountId2%"',
+                   7 => 'Set "%modShortName%" start skill of account "%accountId%" to "%startSkill%"',
+                   8 => 'Reset "%modShortName%" start skill of account "%accountId%"');
 
 my %gameTypeMapping=('Duel' => 'Duel',
                      'FFA' => 'Ffa',
@@ -527,6 +534,14 @@ create table if not exists ts${gameType}Players (
   index(skill)
 ) engine=MyISAM partition by list(period) ( partition p$currentPeriod values in ($currentPeriod) )","create partitioned table \"ts${gameType}Players\"");
   }
+
+  $self->do("
+create table if not exists tsStartSkills (
+  accountId int unsigned,
+  modShortName char(8),
+  startSkill smallint unsigned,
+  primary key (accountId,modShortName)
+) engine=MyISAM",'create table "tsStartSkills"');
 
   $self->do('
 create table if not exists tsRatingQueue (
@@ -1164,9 +1179,11 @@ sub getSkills {
 
   if(! defined $userSkill) {
     $self->log("getSkills called for unrated user ID \"$userId\"",3);
+    my $modShortName = $quotedModShortName =~ /^'(.+)'$/ ? $1 : undef;
+    my $userStartSkill=$self->getAccountEffectiveStartSkill($userId,$modShortName,1);
     my %skills;
     foreach my $gameType (keys %gameTypeMapping) {
-      $skills{$gameType}={mu => 25, sigma => 25/3};
+      $skills{$gameType}={mu => ($gameType eq 'Team' || $gameType eq 'TeamFFA' ) ? ($userStartSkill // 25) : 25, sigma => 25/3};
     }
     return \%skills;
   }
@@ -1198,6 +1215,131 @@ sub getSkills {
   $self->log("Encountered $getSkillErrors lookup failure".($getSkillErrors>1?'s':'')." while fetching skills for $userId (concurrent rerate in progress?)",2) if($getSkillErrors);
 
   return \%skills;
+}
+
+sub getAccountStartSkills {
+  my ($self,$accountId)=@_;
+  my %results;
+  my $sth=$self->prepExec("select modShortName,startSkill from tsStartSkills where accountId=$accountId","retrieve account start skills for account $accountId");
+  while(my @result=$sth->fetchrow_array()) {
+    $results{$result[0]}=$result[1];
+  }
+  return \%results;
+}
+
+# Called by sldbLi.pl
+sub getAccountStartSkill {
+  my ($self,$accountId,$modShortName)=@_;
+  my $quotedModShortName=$self->quote($modShortName);
+  my $sth=$self->prepExec("select startSkill from tsStartSkills where accountId=$accountId and modShortName=$quotedModShortName","retrieve account start skill for account $accountId and mod $modShortName");
+  if(my @result=$sth->fetchrow_array()) {
+    return $result[0];
+  }
+  return undef;
+}
+
+# Called by sldbLi.pl, getAccountEffectiveStartSkills()
+sub getUserAccountsStartSkills {
+  my ($self,$accountId,$accountIdIsUserId)=@_;
+  my $userId;
+  if($accountIdIsUserId) {
+    $userId=$accountId;
+  }else{
+    $userId=$self->getUserId($accountId);
+    if(! defined $userId) {
+      $self->log("getUserAccountsStartSkills called for an unknown account ID \"$accountId\"",2);
+      return {};
+    }
+  }
+  my %results;
+  my $sth=$self->prepExec("select tss.accountId,tss.modShortName,tss.startSkill from tsStartSkills tss,userAccounts ua where ua.userId=$userId and ua.accountId=tss.accountId","retrieve user accounts start skills for account $accountId");
+  while(my @result=$sth->fetchrow_array()) {
+    $results{$result[0]}{$result[1]}=$result[2];
+  }
+  return \%results;
+}
+
+# Called by sldbLi.pl, getAccountEffectiveStartSkill()
+sub getUserAccountsStartSkill {
+  my ($self,$accountId,$modShortName,$accountIdIsUserId)=@_;
+  my $userId;
+  if($accountIdIsUserId) {
+    $userId=$accountId;
+  }else{
+    $userId=$self->getUserId($accountId);
+    if(! defined $userId) {
+      $self->log("getUserAccountsStartSkill called for an unknown account ID \"$accountId\"",2);
+      return {};
+    }
+  }
+  my $quotedModShortName=$self->quote($modShortName);
+  my %results;
+  my $sth=$self->prepExec("select tss.accountId,tss.startSkill from tsStartSkills tss,userAccounts ua where ua.userId=$userId and ua.accountId=tss.accountId and tss.modShortName=$quotedModShortName","retrieve user accounts start skill for account $accountId and mod $modShortName");
+  while(my @result=$sth->fetchrow_array()) {
+    $results{$result[0]}=$result[1];
+  }
+  return \%results;
+}
+
+# Called by sldbLi.pl
+sub getAccountEffectiveStartSkills {
+  my ($self,$accountId,$accountIdIsUserId)=@_;
+  my $userId;
+  if($accountIdIsUserId) {
+    $userId=$accountId;
+  }else{
+    $userId=$self->getUserId($accountId);
+    if(! defined $userId) {
+      $self->log("getAccountEffectiveStartSkills called for an unknown account ID \"$accountId\"",2);
+      return {};
+    }
+  }
+  my $r_userAccountsStartSkills=$self->getUserAccountsStartSkills($userId,1);
+  my %results;
+  my %subAccountsResults;
+  %results=%{$r_userAccountsStartSkills->{$userId}} if(exists $r_userAccountsStartSkills->{$userId});
+  foreach my $userAccount (keys %{$r_userAccountsStartSkills}) {
+    next if($userAccount == $userId);
+    foreach my $modShortName (keys %{$r_userAccountsStartSkills->{$userAccount}}) {
+      next if(exists $results{$modShortName});
+      push(@{$subAccountsResults{$modShortName}},$r_userAccountsStartSkills->{$userAccount}{$modShortName});
+    }
+  }
+  foreach my $modShortName (keys %subAccountsResults) {
+    $results{$modShortName}=int(sum(@{$subAccountsResults{$modShortName}})/@{$subAccountsResults{$modShortName}}+0.5);
+  }
+  return \%results;
+}
+
+# Called by ratingEngine.pl, sldbLi.pl, getSkills()
+sub getAccountEffectiveStartSkill {
+  my ($self,$accountId,$modShortName,$accountIdIsUserId)=@_;
+  my $userId;
+  if($accountIdIsUserId) {
+    $userId=$accountId;
+  }else{
+    $userId=$self->getUserId($accountId);
+    if(! defined $userId) {
+      $self->log("getAccountEffectiveStartSkill called for an unknown account ID \"$accountId\"",2);
+      return undef;
+    }
+  }
+  my $r_userAccountsStartSkill=$self->getUserAccountsStartSkill($userId,$modShortName,1);
+  return undef unless(%{$r_userAccountsStartSkill});
+  return $r_userAccountsStartSkill->{$userId} if(exists $r_userAccountsStartSkill->{$userId});
+  my @userAccountsStartSkills=values %{$r_userAccountsStartSkill};
+  return int(sum(@userAccountsStartSkills)/@userAccountsStartSkills+0.5);
+}
+
+# Called by sldbLi.pl
+sub setAccountStartSkill {
+  my ($self,$accountId,$modShortName,$startSkill)=@_;
+  my $quotedModShortName=$self->quote($modShortName);
+  if(defined $startSkill) {
+    $self->do("insert into tsStartSkills values ($accountId,$quotedModShortName,$startSkill) on duplicate key update startSkill=$startSkill","insert or update startSkill for account $accountId and mod $modShortName in table tsStartSkills");
+  }else{
+    $self->do("delete from tsStartSkills where accountId=$accountId and modShortName=$quotedModShortName","delete startSkill for account $accountId and mod $modShortName from table tsStartSkills");
+  }
 }
 
 # Called by xmlRpc.pl

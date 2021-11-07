@@ -101,6 +101,8 @@ my %lobbyHandlers = ( adminevents => \&hAdminEvents,
                       set => \&hSet,
                       setbanlist => \&hSetBanList,
                       setname => \&hSetName,
+                      setstartskill => \&hSetStartSkill,
+                      showstartskills => \&hShowStartSkills,
                       skillgraph => \&hSkillGraph,
                       splitacc => \&hSplitAcc,
                       topskill => \&hTopSkill,
@@ -161,6 +163,7 @@ my %battleHosts;
 my %newGamesFinished;
 my %hostsVersions;
 my %forkedProcesses;
+my $lastBatchRatingStatus;
 
 my $sldbSimpleLog=SimpleLog->new(logFiles => [$conf{logDir}."/sldbLi.log",''],
                                  logLevels => [$conf{sldbLogLevel},3],
@@ -446,6 +449,8 @@ sub formatArray {
     }elsif(realLength($title) < $rowLength-1) {
       $title="[$title]";
       $title=(' ' x int(($rowLength-realLength($title))/2)).$title.(' ' x ceil(($rowLength-realLength($title))/2));
+    }else{
+      $title=$title.':';
     }
     unshift(@rows,$title);
   }
@@ -690,7 +695,9 @@ sub handleRequest {
                 sa => 'splitAcc',
                 sbl => 'setBanList',
                 sg => 'skillGraph',
+                shss => 'showStartSkills',
                 sn => 'setName',
+                sss => 'setStartSkill',
                 su => 'searchUser',
                 ts => 'topSkill',
                 uips => 'checkUserIps',
@@ -757,7 +764,7 @@ sub invalidSyntax {
   
 
 sub checkTimedEvents {
-  if(time - $timestamps{ratingStateCheck} > 5 && $lobbyState > 3 && exists $lobby->{users}->{$conf{lobbyLogin}} && exists $lobby->{channels}->{$masterChannel}) {
+  if(time - $timestamps{ratingStateCheck} > 2 && $lobbyState > 3 && exists $lobby->{users}->{$conf{lobbyLogin}} && exists $lobby->{channels}->{$masterChannel}) {
     $timestamps{ratingStateCheck}=time;
 
     my %clientStatus = %{$lobby->{users}->{$conf{lobbyLogin}}->{status}};
@@ -767,14 +774,19 @@ sub checkTimedEvents {
     my $p_ratingState=$sldb->getRatingState();
     $realState=1 if(exists $p_ratingState->{batchRatingStatus} && $p_ratingState->{batchRatingStatus});
 
-    if($lobbyState != $realState) {
-      my $broadcastMsg='Rating batch status: ';
-      if($realState) {
-        $broadcastMsg.='running';
+    if($realState && ! $lastBatchRatingStatus) {
+      if(defined $lastBatchRatingStatus) {
+        broadcastMsg('Rating batch started.');
       }else{
-        $broadcastMsg.='stopped';
+        broadcastMsg('Rating batch in progress...');
       }
-      broadcastMsg($broadcastMsg);
+    }elsif(! $realState && $lastBatchRatingStatus) {
+      broadcastMsg('Rating batch completed.');
+      broadcastRatingChanges();
+    }
+    $lastBatchRatingStatus=$realState;
+    
+    if($lobbyState != $realState) {
       $clientStatus{inGame}=$realState;
       queueLobbyCommand(["MYSTATUS",$lobby->marshallClientStatus(\%clientStatus)]);
     }
@@ -919,6 +931,26 @@ sub enforceHostBans {
   my @kickBannedIds=grep {exists $p_smurfBans->{lists}->{$banList}->{$_}} (keys %userIdsToCheck);
   foreach my $kickBannedId (@kickBannedIds) {
     sayPrivate($hostName,"!kickBan $userIdsToCheck{$kickBannedId}");
+  }
+}
+
+sub broadcastRatingChanges {
+  foreach my $host (keys %hostSkills) {
+    my @newGetSkillParams;
+    foreach my $player (keys %{$hostSkills{$host}}) {
+      push(@newGetSkillParams,"$lobby->{users}{$player}{accountId}|$hostSkills{$host}{$player}{ip}");
+      if($#newGetSkillParams > 6) {
+        unshift(@newGetSkillParams,3) if(exists $hostsVersions{$host} && $hostsVersions{$host} == 3);
+        my $paramsString=join(' ',@newGetSkillParams);
+        handleRequest('pv',$host,"#getSkill $paramsString");
+        @newGetSkillParams=();
+      }
+    }
+    if(@newGetSkillParams) {
+      unshift(@newGetSkillParams,3) if(exists $hostsVersions{$host} && $hostsVersions{$host} == 3);
+      my $paramsString=join(' ',@newGetSkillParams);
+      handleRequest('pv',$host,"#getSkill $paramsString");
+    }
   }
 }
 
@@ -1766,7 +1798,6 @@ sub hLeaderboard {
   return genericLeaderboard($source,$user,'leaderboard',$p_params);
 }
 
-
 sub hNotSmurf {
   my ($source,$user,$p_params)=@_;
   if($#{$p_params} != 1) {
@@ -2454,6 +2485,280 @@ sub hSetName {
   }else{
     answer("Unable to log action in admin event table, rename cancelled!");
     return 0;
+  }
+}
+
+sub hSetStartSkill {
+  my ($source,$user,$r_params)=@_;
+  
+  if($#{$r_params} < 1 || $#{$r_params} > 2) {
+    invalidSyntax($user,'setstartskill');
+    return 0;
+  }
+
+  my ($accountString,$modShortNameString,$startSkill)=@{$r_params};
+
+  my $accountId;
+  if($accountString =~ /^#(\d+)$/) {
+    $accountId=$1;
+  }else{
+    $accountId=$sldb->identifyUniqueAccountByString($accountString);
+    if(! defined $accountId) {
+      answer("No account found for search string \"$accountString\" !");
+    }elsif($accountId == -1) {
+      answer("Multiple account names match your search string \"$accountString\", use more specific search string or use !searchUser command first");
+    }elsif($accountId == -2) {
+      answer("Multiple user names contain your search string \"$accountString\", use more specific search string or use !searchUser command first");
+    }elsif($accountId == -3) {
+      answer("Multiple account names contain your search string \"$accountString\", use more specific search string or use !searchUser command first");
+    }
+    return 0 unless(defined $accountId && $accountId > 0);
+  }
+
+  my ($userId,$userName,$accountName);
+  my $sth=$sldb->prepExec("select ud.userId,ud.name, n.name from userAccounts ua, userDetails ud, names n left outer join names n2 on n.accountId=n2.accountId and n.lastConnection < n2.lastConnection where n2.accountId is null and n.accountId=$accountId and ua.accountId=n.accountId and ua.userId=ud.userId","retrieve user and account names for account ID $accountId from userAccounts, userDetails and names tables");
+  if(my @namesData=$sth->fetchrow_array()) {
+    ($userId,$userName,$accountName)=@namesData;
+  }else{
+    invalidSyntax($user,'setstartskill',"unknown account ID \"$accountString\"");
+    return 0;
+  }
+  
+  my $modShortName=$sldb->fixModShortName($modShortNameString);
+  if(! defined $modShortName) {
+    my $r_allowedMods=$sldb->getModsShortNames();
+    my $allowedModsString=join(',',@{$r_allowedMods});
+    invalidSyntax($user,'setstartskill',"invalid mod short name \"$modShortNameString\", allowed values: $allowedModsString");
+    return 0;
+  }
+
+  if(defined $startSkill) {
+    if($startSkill =~ /^\d?\d$/) {
+      $startSkill+=0;
+    }else{
+      invalidSyntax($user,'setstartskill',"invalid start skill value \"$startSkill\"");
+      return 0;
+    }
+  }
+
+  my ($p_C,$B)=initUserIrcColors($user);
+  my %C=%{$p_C};
+
+  my $previousStartSkill=$sldb->getAccountStartSkill($accountId,$modShortName);
+  if(defined $startSkill && defined $previousStartSkill && $startSkill == $previousStartSkill) {
+    answer("Start skill of account #$accountId \"$accountName\" is already set to $C{12}$startSkill$C{1} for $C{3}$modShortName$C{1}");
+    return 0;
+  }elsif(! defined $startSkill && ! defined $previousStartSkill) {
+    answer("Start skill of account #$accountId \"$accountName\" is already set to default value for $C{3}$modShortName$C{1}");
+    return 0;
+  }
+  
+  answer("$C{7}Warning:$C{1} setting start skill value for a secondary account (#$accountId \"$accountName\") of user #$userId \"$userName\". Start skill values set on secondary accounts are overriden by start skill values set on user IDs.") if(defined $startSkill && $accountId != $userId);
+  
+  my $admEvt;
+  if(defined $startSkill) {
+    my $subType =  $accountId == $userId ? 0 : 1;
+    $subType+=2 if(defined $previousStartSkill);
+    $admEvt=$sldb->adminEvent('SET_STARTSKILL',$subType,1,$user eq '*' ? 1 : $lobby->{users}{$user}{accountId},{accountId => $accountId, modShortName => $modShortName, startSkill => $startSkill});
+  }else{
+    my $subType =  $accountId == $userId ? 0 : 1;
+    $admEvt=$sldb->adminEvent('RESET_STARTSKILL',$subType,1,$user eq '*' ? 1 : $lobby->{users}{$user}{accountId},{accountId => $accountId, modShortName => $modShortName});
+  }
+  if($admEvt > 0) {
+    my $oldEffectiveStartSkill=$sldb->getAccountEffectiveStartSkill($userId,$modShortName,1);
+    $sldb->setAccountStartSkill($accountId,$modShortName,$startSkill);
+    my $newEffectiveStartSkill=$sldb->getAccountEffectiveStartSkill($userId,$modShortName,1);
+    my ($effectiveStartSkillChanged,$rerateStartPeriod);
+    if((defined $oldEffectiveStartSkill && defined $newEffectiveStartSkill && $oldEffectiveStartSkill != $newEffectiveStartSkill)
+       || (defined $oldEffectiveStartSkill && ! defined $newEffectiveStartSkill)
+       || (! defined $oldEffectiveStartSkill && defined $newEffectiveStartSkill)) {
+      $effectiveStartSkillChanged=1;
+    }else{
+      $effectiveStartSkillChanged=0;
+    }
+    my $quotedModShortName;
+    if($effectiveStartSkillChanged) {
+      $quotedModShortName=$sldb->quote($modShortName);
+      my $sth2=$sldb->prepExec("select YEAR(min(gdrTimestamp)),MONTH(min(gdrTimestamp)) from tsTeamGames tstg,userAccounts ua where ua.userId=$userId and ua.accountId=tstg.accountId and modShortName=$quotedModShortName group by modShortName","retrieve rerate start dates for user $userId and MOD $modShortName from tsTeamGames table");
+      if(my @dataFound=$sth2->fetchrow_array()) {
+        $sldb->queueGameRerate($modShortName,$dataFound[0].sprintf('%02d',$dataFound[1]));
+        $rerateStartPeriod=$dataFound[0].'-'.sprintf('%02d',$dataFound[1]);
+      }
+    }
+    answer("Start skill of account #$accountId \"$accountName\""
+           .(defined $startSkill ? " set to $C{12}$startSkill$C{1}" : ' reset to default value')
+           ." for $C{3}$modShortName$C{1} ("
+           .(defined $rerateStartPeriod ? "rerate of $modShortName from $rerateStartPeriod scheduled)" : ($effectiveStartSkillChanged ? '' : 'no impact on effective start skill, ').'no rerate needed)'));
+    if($effectiveStartSkillChanged && ! defined $rerateStartPeriod) {
+      my $r_userAccounts=$sldb->getUserAccounts($userId);
+      my @onlineUserAccountNames;
+      map {push(@onlineUserAccountNames,$lobby->{accounts}{$_}) if(exists $lobby->{accounts}{$_})} @{$r_userAccounts};
+      foreach my $host (keys %hostSkills) {
+        my @newGetSkillParams;
+        foreach my $userAccountName (@onlineUserAccountNames) {
+          next unless(exists $hostSkills{$host}{$userAccountName} && $quotedModShortName eq $hostSkills{$host}{$userAccountName}{mod});
+          push(@newGetSkillParams,"$lobby->{users}{$userAccountName}{accountId}|$hostSkills{$host}{$userAccountName}{ip}");
+          if($#newGetSkillParams > 6) {
+            unshift(@newGetSkillParams,3) if(exists $hostsVersions{$host} && $hostsVersions{$host} == 3);
+            my $paramsString=join(' ',@newGetSkillParams);
+            handleRequest('pv',$host,"#getSkill $paramsString");
+            @newGetSkillParams=();
+          }
+        }
+        if(@newGetSkillParams) {
+          unshift(@newGetSkillParams,3) if(exists $hostsVersions{$host} && $hostsVersions{$host} == 3);
+          my $paramsString=join(' ',@newGetSkillParams);
+          handleRequest('pv',$host,"#getSkill $paramsString");
+        }
+      }
+    }
+    return 1;
+  }else{
+    answer('Unable to log action in admin event table, setStartSkill cancelled!');
+    return 0;
+  }
+}
+
+sub hShowStartSkills {
+  my ($source,$user,$r_params)=@_;
+
+  if(@{$r_params} > 2) {
+    invalidSyntax($user,'showstartskills');
+    return 0;
+  }
+  
+  my ($accountString,$modShortNameString)=@{$r_params};
+
+  my ($accountId,$modShortName,$userId,$userName,$accountName);
+  if(defined $accountString) {
+    if($accountString ne '*') {
+      if($accountString =~ /^#(\d+)$/) {
+        $accountId=$1;
+      }else{
+        $accountId=$sldb->identifyUniqueAccountByString($accountString);
+        if(! defined $accountId) {
+          answer("No account found for search string \"$accountString\" !");
+        }elsif($accountId == -1) {
+          answer("Multiple account names match your search string \"$accountString\", use more specific search string or use !searchUser command first");
+        }elsif($accountId == -2) {
+          answer("Multiple user names contain your search string \"$accountString\", use more specific search string or use !searchUser command first");
+        }elsif($accountId == -3) {
+          answer("Multiple account names contain your search string \"$accountString\", use more specific search string or use !searchUser command first");
+        }
+        return 0 unless(defined $accountId && $accountId > 0);
+      }
+
+      my $sth=$sldb->prepExec("select ud.userId,ud.name, n.name from userAccounts ua, userDetails ud, names n left outer join names n2 on n.accountId=n2.accountId and n.lastConnection < n2.lastConnection where n2.accountId is null and n.accountId=$accountId and ua.accountId=n.accountId and ua.userId=ud.userId","retrieve user and account names for account ID $accountId from userAccounts, userDetails and names tables");
+      if(my @namesData=$sth->fetchrow_array()) {
+        ($userId,$userName,$accountName)=@namesData;
+      }else{
+        invalidSyntax($user,'showstartskills',"unknown account ID \"$accountString\"");
+        return 0;
+      }
+    }
+    if(defined $modShortNameString) {
+      $modShortName=$sldb->fixModShortName($modShortNameString);
+      if(! defined $modShortName) {
+        my $r_allowedMods=$sldb->getModsShortNames();
+        my $allowedModsString=join(',',@{$r_allowedMods});
+        invalidSyntax($user,'showstartskills',"invalid mod short name \"$modShortNameString\", allowed values: $allowedModsString");
+        return 0;
+      }
+    }
+  }
+
+  my ($p_C,$B)=initUserIrcColors($user);
+  my %C=%{$p_C};
+  
+  my $sth;
+  if(! defined $accountId) {
+    if(defined $modShortName) {
+      my $quotedModShortName=$sldb->quote($modShortName);
+      $sth=$sldb->prepExec("select accountId,startSkill from tsStartSkills where modShortName=$quotedModShortName limit 200","retrieve start skills for $modShortName from tsStartSkills table");
+    }else{
+      $sth=$sldb->prepExec("select accountId,group_concat(modShortName,':',startSkill order by modShortName separator ', ') from tsStartSkills group by accountId limit 200",'retrieve all start skills from tsStartSkills table');
+    }
+    my @resultData;
+    while(my @results=$sth->fetchrow_array()) {
+      push(@resultData,{"$C{5}AccountId" => "$C{12}$results[0]", StartSkills => "$C{1}$results[1]"});
+    }
+    if(@resultData) {
+      my $r_resultLines=formatArray(["$C{5}AccountId",'StartSkills'],\@resultData,$C{2}.(defined $modShortName ? "$modShortName " : 'Configured '). "start skills$C{1}");
+      sayPrivate($user,'.');
+      foreach my $resultLine (@{$r_resultLines}) {
+        sayPrivate($user,$resultLine);
+      }
+      sayPrivate($user,"$C{4}Result truncated to first 200 entries.") if(@resultData == 200);
+    }else{
+      answer("No start skill found.");
+    }
+  }else{
+    if(defined $modShortName) {
+      my $effectiveStartSkill=$sldb->getAccountEffectiveStartSkill($userId,$modShortName,1);
+      if(defined $effectiveStartSkill) {
+        sayPrivate($user,"Effective $modShortName start skill for account #$accountId \"$accountName\"".($userId == $accountId ? '' : " (user #$userId \"$userName\")").": $C{12}$effectiveStartSkill");
+        my $r_startSkills=$sldb->getUserAccountsStartSkill($userId,$modShortName,1);
+        my @resultData;
+        push(@resultData,{"$C{5}AccountId" => "$C{6}$userId", StartSkills => "$C{1}$r_startSkills->{$userId}"}) if(exists $r_startSkills->{$userId});
+        push(@resultData,{"$C{5}AccountId" => "$C{12}$accountId", StartSkills => "$C{1}$r_startSkills->{$accountId}"}) if($accountId != $userId && exists $r_startSkills->{$accountId});
+        foreach my $id (sort {$a <=> $b} keys %{$r_startSkills}) {
+          push(@resultData,{"$C{5}AccountId" => "$C{10}$id", StartSkills => "$C{1}$r_startSkills->{$id}"}) if($id != $userId && $id != $accountId);
+        }
+        my $r_resultLines=formatArray(["$C{5}AccountId",'StartSkills'],\@resultData,"$C{2}Configured $modShortName start skills for accounts of user #$userId \"$userName\"$C{1}");
+        sayPrivate($user,'.');
+        foreach my $resultLine (@{$r_resultLines}) {
+          sayPrivate($user,$resultLine);
+        }
+        sayPrivate($user,"$C{4}Result truncated to first 200 entries.") if(@resultData == 200);
+      }else{
+        answer("No $modShortName start skill defined for account #$accountId \"$accountName\"".($userId == $accountId ? '' : " (user #$userId \"$userName\")"));
+      }
+    }else{
+      my $r_effectiveStartSkills=$sldb->getAccountEffectiveStartSkills($userId,1);
+      if(%{$r_effectiveStartSkills}) {
+        my @resultData;
+        foreach my $mod (sort keys %{$r_effectiveStartSkills}) {
+          push(@resultData,{"$C{5}Game" => $C{12}.$mod, EffectiveStartSkill => $C{1}.$r_effectiveStartSkills->{$mod}});
+        }
+        my $r_resultLines=formatArray(["$C{5}Game",'EffectiveStartSkill'],\@resultData,"$C{2}Effective start skills for account #$accountId \"$accountName\"".($userId == $accountId ? '' : " (user #$userId \"$userName\")$C{1}"));
+        sayPrivate($user,'.');
+        foreach my $resultLine (@{$r_resultLines}) {
+          sayPrivate($user,$resultLine);
+        }
+        my $r_startSkills=$sldb->getUserAccountsStartSkills($userId,1);
+        @resultData=();
+        if(exists $r_startSkills->{$userId}) {
+          my %userData=("$C{5}AccountId" => "$C{6}$userId");
+          foreach my $mod (keys %{$r_startSkills->{$userId}}) {
+            $userData{$mod}=$C{1}.$r_startSkills->{$userId}{$mod};
+          }
+          push(@resultData,\%userData);
+        }
+        if($accountId != $userId && exists $r_startSkills->{$accountId}) {
+          my %accountData=("$C{5}AccountId" => "$C{12}$accountId");
+          foreach my $mod (keys %{$r_startSkills->{$accountId}}) {
+            $accountData{$mod}=$C{1}.$r_startSkills->{$accountId}{$mod};
+          }
+          push(@resultData,\%accountData);
+        }
+        foreach my $id (sort {$a <=> $b} keys %{$r_startSkills}) {
+          next if($id == $userId || $id == $accountId);
+          my %accountData=("$C{5}AccountId" => "$C{10}$id");
+          foreach my $mod (keys %{$r_startSkills->{$id}}) {
+            $accountData{$mod}=$C{1}.$r_startSkills->{$id}{$mod};
+          }
+          push(@resultData,\%accountData);
+        }
+        $r_resultLines=formatArray(["$C{5}AccountId",sort keys %{$r_effectiveStartSkills}],\@resultData,"$C{2}Configured start skills for accounts of user #$userId \"$userName\"$C{1}");
+        sayPrivate($user,'.');
+        foreach my $resultLine (@{$r_resultLines}) {
+          sayPrivate($user,$resultLine);
+        }
+        sayPrivate($user,"$C{4}Result truncated to first 200 entries.") if(@resultData == 200);
+      }else{
+        answer("No start skill defined for account #$accountId \"$accountName\"".($userId == $accountId ? '' : " (user #$userId \"$userName\")"));
+      }
+    }
   }
 }
 
