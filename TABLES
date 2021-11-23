@@ -2,14 +2,13 @@
                                 SLDB tables
 ===============================================================================
 
-SLDB currently uses 36 tables, which can be divided in 8 categories (check "createTablesIfNeeded" function from Sldb.pm file for more detailed information):
+SLDB currently uses following tables, which can be divided in 8 categories (check "createTablesIfNeeded" function from Sldb.pm file for more detailed information):
 
 Main lobby tables: (filled by slMonitor by monitoring Spring lobby)
 =================
   accounts: id, rank, admin, bot, lastUpdate
   names: accountId, name, lastConnection
   countries: accountId, country, lastConnection
-  cpus: accountId, cpu, lastConnection
   hardwareIds: accountId, hardwareId, lastConnection
   systemIds: accountId, systemId, lastConnection
   games: hostAccountId, startTimestamp, endTimestamp, endCause, hostName, modName, mapName, nbSpec, nbPlayer, description, passworded, engineName, engineVersion, gameId
