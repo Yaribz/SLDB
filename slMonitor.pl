@@ -7,7 +7,7 @@
 # - monitor and store all lobby data (users, battles...) into SLDB in realtime
 # - receive, check, and store game data reports (GDR) sent by SPADS into SLDB
 #
-# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2022  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -39,7 +39,10 @@ require SimpleLog;
 require Sldb;
 require SpringLobbyInterface;
 
-my $slMonVer='0.4';
+my $slMonVer='0.5';
+
+$SIG{TERM} = \&sigTermHandler;
+$SIG{USR1} = \&sigUsr1Handler;
 
 my $confFile=catfile($scriptDir,'etc',"$scriptBaseName.conf");
 $confFile=$ARGV[0] if($#ARGV == 0);
@@ -161,6 +164,16 @@ my $sldb=Sldb->new({dbDs => $dbDs,
                     sqlErrorHandler => \&error});
 $sldb->connect();
 $sldb->do("set session time_zone = '+0:00'","set UTC timezone to avoid DST problems");
+
+sub sigTermHandler {
+  slog('SIGTERM signal received, exiting...',2);
+  $stopping=1;
+}
+
+sub sigUsr1Handler {
+  slog('SIGUSR1 signal received, restarting...',2);
+  $stopping=2;
+}
 
 sub cbLobbyConnect {
   $lobbyState=2;
@@ -1473,7 +1486,8 @@ sub handleCommand {
               }
               checkNonSmurfs(\@nonSmurfAccounts) if($#nonSmurfAccounts > 0);
               foreach my $p_bot (@{$p_gdr->{bots}}) {
-                my ($quotedName,$quotedAi)=$sldb->quote($p_bot->{name},$p_bot->{ai});
+                my $truncatedAi=substr($p_bot->{ai},0,64);
+                my ($quotedName,$quotedAi)=$sldb->quote($p_bot->{name},$truncatedAi);
                 $sldb->do("insert into botsDetails values ($quotedGameId,$quotedName,$p_bot->{accountId},$quotedAi,$p_bot->{team},$p_bot->{allyTeam},$p_bot->{win})","insert data in table botsDetails");
               }
               $sldb->do("insert into tsRatingQueue values ($quotedGameId,FROM_UNIXTIME($GDRs{$user}->{timestamp}),0)","add game $p_gdr->{gameId} in rating queue table") if(! $hasBot && ! $undecided && ! $p_gdr->{cheating} && $p_gdr->{type} ne 'Solo');
