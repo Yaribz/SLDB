@@ -1,26 +1,27 @@
 #!/bin/bash
 
-LOBBY_PORT="${LOBBY_PORT:=8200}"
-XMLRPC_LISTEN_ADDR="${XMLRPC_LISTEN_ADDR:=0.0.0.0}"
-XMLRPC_LISTEN_PORT="${XMLRPC_LISTEN_PORT:=8300}"
+DELIMITER_CONF_FILES='#'
+DELIMITER_CONF_SETTINGS='%'
 
-SLDB_DB_USER="${SLDB_DB_USER:-}"
-SLDB_DB_PASSWORD="${SLDB_DB_PASSWORD:-}"
-SLDB_DB_DATABASE="${SLDB_DB_DATABASE:-}"
-LOBBY_LOGIN="${LOBBY_LOGIN:-}"
-LOBBY_PASSWORD="${LOBBY_PASSWORD:-}"
+logfile_var_name="$(echo $COMPONENT_NAME | tr '[:lower:]' '[:upper:]')_LOGFILE"
+logfile_var=${!logfile_var_name}
 
-[ -z "$SLDB_DB_USER" ] && echo "WARN: SLDB_DB_USER missing"
-[ -z "$SLDB_DB_PASSWORD" ] && echo "WARN: SLDB_DB_PASSWORD missing"
-[ -z "$SLDB_DB_DATABASE" ] && echo "WARN: SLDB_DB_DATABASE missing"
-[ -z "$LOBBY_LOGIN" ] && echo "WARN: LOBBY_LOGIN missing"
-[ -z "$LOBBY_PASSWORD" ] && echo "WARN: LOBBY_PASSWORD missing"
-[ -z "$MONITOR_LOBBY_PASSWORD" ] && echo "WARN: MONITOR_LOBBY_PASSWORD missing"
+conf_var_name="$(echo $COMPONENT_NAME | tr '[:lower:]' '[:upper:]')_CONF"
+conf_var=${!conf_var_name}
 
-find /etc/sldb -name "*.conf" -exec sh -c '/opt/replace-vars.sh {} "/sldb/etc/$(basename {})"' \;
+IFS=$DELIMITER_CONF_FILES; conf_lines=($conf_var); unset IFS;
 
-touch /sldb/log/$LOGFILE.log
+for conf_line in "${conf_lines[@]}"
+do
+  IFS=$DELIMITER_CONF_SETTINGS; conf_entries=($conf_line); unset IFS;
+  conf_file=${conf_entries[0]}
+  conf_settings=${conf_entries[1]}
 
-echo "Running $@ at $(printf '%s %s\n' "$(date)")" >> /sldb/log/$LOGFILE.log
+  touch /etc/sldb/$conf_file.conf
+  mv /etc/sldb/$conf_file.conf etc/$conf_file.conf
+  perl updateConfFile.pl etc/$conf_file.conf $conf_settings
+done
+
+echo "Running $@ at $(printf '%s %s\n' "$(date)")" >> $logfile_var
 
 exec $@ 2>&1 | tee -a /sldb/log/$LOGFILE.log

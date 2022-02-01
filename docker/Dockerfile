@@ -57,18 +57,20 @@ RUN cpanm --quiet --notest Inline::Python \
  && cpanm --quiet --notest Term::ReadLine::Gnu \
  && cpanm --quiet --notest Chart::Clicker
 
-RUN curl -LO https://raw.githubusercontent.com/Yaribz/SimpleConf/master/SimpleConf.pm \
- && curl -LO https://raw.githubusercontent.com/Yaribz/SimpleLog/master/SimpleLog.pm \
- && curl -LO https://raw.githubusercontent.com/Yaribz/SpringLobbyInterface/master/SpringLobbyInterface.pm \
- && curl -LO https://github.com/sublee/trueskill/archive/refs/tags/v0.4.5.tar.gz \
- && tar -xvf v0.4.5.tar.gz trueskill-0.4.5/trueskill \
- && mv trueskill-0.4.5/trueskill ./ \
- && rm -rf trueskill-0.4.5 v0.4.5.tar.gz \
+ENV TRUESKILL_VERSION=0.4.5
+RUN curl -LO https://github.com/sublee/trueskill/archive/refs/tags/v$TRUESKILL_VERSION.tar.gz \
+ && tar -xvf v$TRUESKILL_VERSION.tar.gz trueskill-$TRUESKILL_VERSION/trueskill \
+ && mv trueskill-$TRUESKILL_VERSION/trueskill ./ \
+ && rm -rf trueskill-$TRUESKILL_VERSION v$TRUESKILL_VERSION.tar.gz \
  && mkdir -p etc log
+
+ADD https://raw.githubusercontent.com/Yaribz/SimpleConf/master/SimpleConf.pm ./
+ADD https://raw.githubusercontent.com/Yaribz/SimpleLog/master/SimpleLog.pm ./
+ADD https://raw.githubusercontent.com/Yaribz/SpringLobbyInterface/master/SpringLobbyInterface.pm ./
 
 COPY *.pm *.pl ./
 COPY ./var ./var/
 COPY ./docker/scripts/*.sh /opt/
-COPY docker/etc /etc/sldb/
+COPY etc /etc/sldb/
 
 ENTRYPOINT [ "/opt/sldb-entrypoint.sh" ]
