@@ -61,8 +61,7 @@ ENV TRUESKILL_VERSION=0.4.5
 RUN curl -LO https://github.com/sublee/trueskill/archive/refs/tags/v$TRUESKILL_VERSION.tar.gz \
  && tar -xvf v$TRUESKILL_VERSION.tar.gz trueskill-$TRUESKILL_VERSION/trueskill \
  && mv trueskill-$TRUESKILL_VERSION/trueskill ./ \
- && rm -rf trueskill-$TRUESKILL_VERSION v$TRUESKILL_VERSION.tar.gz \
- && mkdir -p etc log
+ && rm -rf trueskill-$TRUESKILL_VERSION v$TRUESKILL_VERSION.tar.gz
 
 ADD https://raw.githubusercontent.com/Yaribz/SimpleConf/master/SimpleConf.pm ./
 ADD https://raw.githubusercontent.com/Yaribz/SimpleLog/master/SimpleLog.pm ./
@@ -71,6 +70,10 @@ ADD https://raw.githubusercontent.com/Yaribz/SpringLobbyInterface/master/SpringL
 COPY *.pm *.pl ./
 COPY ./var ./var/
 COPY ./docker/scripts/*.sh /opt/
+COPY ./docker/scripts/initSldb.pl /sldb/
 COPY etc /etc/sldb/
+COPY docker/etc /etc/sldb/
+
+RUN chmod -R o+rw /sldb
 
 ENTRYPOINT [ "/opt/sldb-entrypoint.sh" ]

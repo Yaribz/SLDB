@@ -14,15 +14,30 @@ To provision docker services for deployment:
 
 - Copy the `.env` and `docker-compose.yml` files to the directory you want
   SLDB to live on your server
-- Edit the `.env` file to your requirements
+- Edit the `.env` file to your requirements, see [Configuration](#configuration)
 - _(optional)_ If your database server is not intended to be hosted with docker
   , remove any `depends_on` references to `sldb-db` on `docker-compose.yml` and
   edit the `SLDB_DB_DATABASE` environment variable accordingly.
 - Run `docker-compose pull`
+- Run `mkdir etc log`
+
+### _(optional)_ Initialize the database
+
+If you are provisioning a new installation for SLDB:
+
+- Create a file named `etc/initSldb.conf` with the following contents:
+  ```
+  dbLogin:<username>
+  dbName:DBI:mysql:database=<dbname>;host=<dbhost>
+  dbPwd:<password>
+  ```
+  If provisioning database with docker, replace the variables with the ones
+  configured in `.env` as `MYSQL_*`
+- Run `docker-compose run xmlRpc perl initSldb.pl`
 
 ### _(optional)_ Migrate the database
 
-If you have a previous installation of SLDB you want to migrate from:
+If you have a previous installation of SLDB you are migrating from:
 
 - Create a dump with `mysqldump -u <username> -p <password> -h <hostname> --databases <dbname> | gzip -c > sldbdump_$(date '+%Y-%m-%d_%H-%M-%S').gz`
 - Copy the generated dump to your new SLDB base directory
@@ -35,8 +50,38 @@ If you have a previous installation of SLDB you want to migrate from:
 Read the [documentation](https://github.com/Yaribz/SLDB#documentation) to
 have a basic understanding of how SLDB operates.
 
-The services are orchestrated so that running only `docker-compose up -d sldb`
+The services are orchestrated so that running only `docker-compose up -d sldbLi`
 should provide you with an operational set of SLDB component services.
 
-The service `xmlrpc` is optional and only required if you have an external
+The service `xmlRpc` is optional and only required if you have an external
 service that needs to communicate with SLDB.
+
+### Configuration
+
+Most of the variables are self explanatory, otherwise:
+
+- `MYSQL_*`: the variables that will be used to initialize the database instance, when provisioned from docker.
+- `UID|GID`: run `id` on your host machine to fetch and configure the values, this ensures permissions are available for the shared volumes: `log` and `etc`
+- `<COMPONENT>_CONF`: set of key-values to dynamically configure the component on initialization, these override defaults when configured
+- `docker-compose.yml`: some files are configured directly in docker-compose.yml, such as levels.conf/commands.conf/users.conf
+
+### Operation
+
+If configured correctly, logs and configuration files should be available at
+`etc` and `log` on the host machine.
+
+_(db provisioned with docker)_ Never stop the database service unless you don't
+need sldb running. All components depends on the database service and should
+start it automatically in case it's not running when they are started.
+
+- To start a component: `docker-compose up -d <component>`
+- To stop a component: `docker-compose stop <component>`
+
+Wait for the command to finish to ensure integrity of the database, when
+stopping.
+
+In case hot-reloading is necessary, it's possible to edit the config files at
+`etc` in the host machine and send `SIGUSR2` to the concerned component. This
+is only encouraged for testing, quick fixes or uptime and won't be persisted if
+the service is restarted. Use the `.env` or `docker-compose.yml` file to persist
+configuration changes (requires restart).

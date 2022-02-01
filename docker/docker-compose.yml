@@ -3,9 +3,9 @@ services:
   sldbLi:
     command: perl sldbLi.pl etc/sldbLi.conf
     image: badosu/sldb:latest
+    user: "${UID}:${GID}"
     environment:
       COMPONENT_NAME: sldbLi
-      SLDBLI_CONF: sldbLi%lobbyLogin:${LOBBY_LOGIN} lobbyPassword:${LOBBY_PASSWORD} lobbyHost:${LOBBY_HOST} lobbyPort:${LOBBY_PORT} sldb:${SLDB_DB_USER}/${SLDB_DB_PASSWORD}@${SLDB_DB_DATABASE}
       USERS_CONF: >
         <accountId1>(<botOwner>)::::::|140\n
         <accountId2>(<botAdmin>)::::::|130\n
@@ -133,14 +133,15 @@ services:
       context: ../
       dockerfile: docker/Dockerfile
     volumes:
-      - sldb-log:/sldb/log
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
 
   slMonitor:
     command: perl slMonitor.pl
     image: badosu/sldb:latest
+    user: "${UID}:${GID}"
     environment:
       COMPONENT_NAME: slMonitor
-      SLMONITOR_CONF: slMonitor%dbLogin:${SLDB_DB_USER} dbName:${SLDB_DB_DATABASE} dbPwd:${SLDB_DB_PASSWORD} lobbyAdminIds:${SLMONITOR_ADMIN_IDS} lobbyHost:${LOBBY_HOST} lobbyPassword:${SLMONITOR_LOBBY_PASSWORD} logFile:${SLMONITOR_LOGFILE} logPvDir:${SLMONITOR_PVLOGDIR}
     env_file:
       - .env
     build:
@@ -149,14 +150,17 @@ services:
     depends_on:
       - sldb-db
     volumes:
-      - sldb-log:/sldb/log
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
 
   ratingEngine:
     command: perl ratingEngine.pl
     image: badosu/sldb:latest
+    user: "${UID}:${GID}"
+    stdin_open: true # docker run -i
+    tty: true 
     environment:
       COMPONENT_NAME: ratingEngine
-      RATINGENGINE_CONF: ratingEngine%dbLogin:${SLDB_DB_USER} dbName:${SLDB_DB_DATABASE} dbPwd:${SLDB_DB_PASSWORD} logFile:${RATINGENGINE_LOGFILE}
     env_file:
       - .env
     build:
@@ -165,14 +169,15 @@ services:
     depends_on:
       - sldb-db
     volumes:
-      - sldb-log:/sldb/log
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
 
   xmlRpc:
     command: perl xmlRpc.pl
     image: badosu/sldb:latest
+    user: "${UID}:${GID}"
     environment:
       COMPONENT_NAME: xmlRpc
-      XMLRPC_CONF: xmlRpc%dbLogin:${SLDB_DB_USER} dbName:${SLDB_DB_DATABASE} dbPwd:${SLDB_DB_PASSWORD} listenAddr:${XMLRPC_LISTEN_ADDR} listenPort:${XMLRPC_LISTEN_PORT} logFile:${XMLRPC_LOGFILE}#xmlRpc.users%${XMLRPC_USERS}
     ports:
       - 8300
     env_file:
@@ -183,7 +188,8 @@ services:
     depends_on:
       - sldb-db
     volumes:
-      - sldb-log:/sldb/log
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
 
   sldb-db:
     image: yobasystems/alpine-mariadb:latest
@@ -197,4 +203,3 @@ services:
     restart: always
 volumes:
   sldb-db:
-  sldb-log:
