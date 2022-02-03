@@ -6,7 +6,7 @@
 # - database initialization
 # - components configuration
 #
-# Copyright (C) 2013-2020  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2022  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -38,6 +38,18 @@ unshift(@INC,$scriptDir);
 require SimpleConf;
 require SimpleLog;
 require Sldb;
+
+if(@ARGV && (@ARGV != 1 || $ARGV[0] ne '--init-db')) {
+  print <<EOU;
+Usage:
+  $0
+      Launch full SLDB setup script
+  $0 --init-db
+      Initialize SLDB database only
+EOU
+  exit; 
+}
+my $initDbOnly=@ARGV;
 
 my $confFile=catfile($scriptDir,'etc',"$scriptBaseName.conf");
 # zkMonitor is deprecated
@@ -131,13 +143,15 @@ p colored((('=' x 29).' START OF SLDB SETUP '.('=' x 29)),'bold cyan');
 
 if(! -f $confFile) {
   p '';
-  p 'This program will help you initialize SLDB database and configure SLDB components';
+  p 'This program will help you initialize SLDB database'.($initDbOnly?'':' and configure SLDB components');
 }else{
   SimpleConf::readConf($confFile,\%conf);
   checkDb() if(checkConf());
   checkTb() if($dbOk);
-  my $unconfiguredComponent=getUnconfiguredComponent();
-  $compConfOk=1 unless(defined $unconfiguredComponent);
+  if(! $initDbOnly) {
+    my $unconfiguredComponent=getUnconfiguredComponent();
+    $compConfOk=1 unless(defined $unconfiguredComponent);
+  }
 }
 
 my ($initTask,$configTask,$quitTask)=('Initialize database','Configure components','Quit');
@@ -203,8 +217,11 @@ sub initCreateDb {
   print $fh "grant all on $conf{dbName}.* to $conf{dbLogin} identified by '$conf{dbPwd}'\n";
   $fh->close();
   p "SLDB database creation commands have been written into following file: $sqlFile";
+  p '';
   p "Please run following command in another console to execute the script as MySQL admin user (you will be asked to enter the MySQL admin password):";
   p "    mysql --user=root -p < $sqlFile";
+  p '';
+  p "(in case of custom installation with a remote database server for example, the above command might not work and you may have to manually execute the commands contained in the script instead, as MySQL admin user)";
   p '';
   p 'Once the script has been executed, press enter to continue...';
   <$tIn>;
@@ -340,15 +357,20 @@ while(1) {
     @allowedTasks=($initTask,$quitTask);
     $defaultTask=$initTask;
   }
-  p '';
-  $task=$t->get_reply( print_me => colored('Setup tasks:','bold blue'),
-                       choices => \@allowedTasks,
-                       default => $defaultTask,
-                       prompt => 'Which task do you want to perform?' );
-  last if($task eq $quitTask);
+  if($initDbOnly) {
+    $task=$initTask;
+  }else{
+    p '';
+    $task=$t->get_reply( print_me => colored('Setup tasks:','bold blue'),
+                         choices => \@allowedTasks,
+                         default => $defaultTask,
+                         prompt => 'Which task do you want to perform?' );
+    last if($task eq $quitTask);
+  }
 
   while(1) {
     @allowedSteps=@{$steps{$task}};
+    my $previousDefaultStep=$defaultStep;
     $defaultStep=$quitStep;
     if($task eq $initTask) {
       if(checkConf()) {
@@ -371,15 +393,21 @@ while(1) {
         $compConfOk=1;
       }
     }
-    p '';
-    $step=$t->get_reply( print_me => colored("$task steps:",'bold blue'),
-                         choices => \@allowedSteps,
-                         default => $defaultStep,
-                         prompt => 'Which step do you want to perform?' );
+    if($initDbOnly) {
+      last if(defined $previousDefaultStep && $previousDefaultStep eq $defaultStep);
+      $step=$defaultStep;
+    }else{
+      p '';
+      $step=$t->get_reply( print_me => colored("$task steps:",'bold blue'),
+                           choices => \@allowedSteps,
+                           default => $defaultStep,
+                           prompt => 'Which step do you want to perform?' );
+    }
     last if($step eq $quitStep);
     p '';
     executeStep($step);
   }
+  last if($initDbOnly);
 }
 
 $sldb->disconnect() if($dbOk);
