@@ -207,25 +207,61 @@ sub initConfDb {
 }
 
 sub initCreateDb {
-  my $sqlFile=catfile($scriptDir,"$scriptBaseName.sql");
-  my $fh=new FileHandle($sqlFile,'w');
-  if(! defined $fh) {
-    p colored("Unable to open $sqlFile for writing, exiting!",'red');
-    exit 1;
+  my ($dbName,$dbIsLocal,$dbHost);
+  if($conf{dbName} =~ /^\w+$/) {
+    ($dbName,$dbIsLocal)=($conf{dbName},1);
+  }elsif($conf{dbName} =~ /^dbi:mysql:(.+)$/i) {
+    my @dbDefs=split(/;/,$1);
+    foreach my $dbDef (@dbDefs) {
+      if($dbDef =~ /^(\w+)=(.+)$/) {
+        my ($attr,$val)=(lc($1),$2);
+        if($attr eq 'database') {
+          $dbName=$val;
+        }elsif($attr eq 'host') {
+          $dbHost=lc($val);
+        }
+      }else{
+        $dbName=$dbDef if(@dbDefs == 1);
+      }
+    }
+    if(defined $dbName &&
+       (! defined $dbHost || $dbHost eq 'localhost' || $dbHost eq '127.0.0.1')) {
+      $dbIsLocal=1;
+    }
   }
-  print $fh "create database if not exists $conf{dbName};\n";
-  print $fh "grant all on $conf{dbName}.* to $conf{dbLogin} identified by '$conf{dbPwd}'\n";
-  $fh->close();
-  p "SLDB database creation commands have been written into following file: $sqlFile";
-  p '';
-  p "Please run following command in another console to execute the script as MySQL admin user (you will be asked to enter the MySQL admin password):";
-  p "    mysql --user=root -p < $sqlFile";
-  p '';
-  p "(in case of custom installation with a remote database server for example, the above command might not work and you may have to manually execute the commands contained in the script instead, as MySQL admin user)";
-  p '';
-  p 'Once the script has been executed, press enter to continue...';
-  <$tIn>;
-  unlink($sqlFile);
+  if(! defined $dbName) {
+    p colored('Unrecognized dbName setting format','yellow');
+    $dbName='<database_name>';
+  }
+  my @sqlCommands=("create database if not exists $dbName;",
+                   "grant all on $dbName.* to $conf{dbLogin} identified by '$conf{dbPwd}';");
+  if($dbIsLocal) {
+    my $sqlFile=catfile($scriptDir,"$scriptBaseName.sql");
+    my $fh=new FileHandle($sqlFile,'w');
+    if(! defined $fh) {
+      p colored("Unable to open $sqlFile for writing, exiting!",'red');
+      exit 1;
+    }
+    foreach my $sqlCmd (@sqlCommands) {
+      print $fh $sqlCmd."\n";
+    }
+    $fh->close();
+    p "SLDB database creation commands have been written into following file: $sqlFile";
+    p "Please run following command in another console to execute the script as MySQL admin user (you will be asked to enter the MySQL admin password):";
+    p "    mysql --user=root -p < $sqlFile";
+    p '';
+    p 'Once the script has been executed, press enter to continue...';
+    <$tIn>;
+    unlink($sqlFile);
+  }else{
+    p 'Please run following SLDB database creation commands on your database server '.(defined $dbHost ? "($dbHost) " : ''). 'as MySQL admin user:';
+    foreach my $sqlCmd (@sqlCommands) {
+      p "    $sqlCmd";
+    }
+    p '';
+    p 'Once the commands have been executed, press enter to continue...';
+    <$tIn>;
+  }
   print $tOut "Testing connection to database $conf{dbName} as user $conf{dbLogin}...";
   checkDb();
   if($dbOk) {
