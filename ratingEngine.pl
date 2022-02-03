@@ -5,7 +5,7 @@
 # The rating engine is in charge of computing all games results to produce
 # players ranking data. It is based on TrueSkill(tm) ranking algorithm.
 #
-# Copyright (C) 2013-2021  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2022  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.7 (2021/11/07)
+# Version 0.8 (2022/02/03)
 
 use strict;
 
@@ -252,7 +252,7 @@ sub createPartitionsIfNeeded {
   my $period=shift;
   my ($sth,@countResult);
   foreach my $gType (keys %gameRatingMapping) {
-    $sth=$sldb->prepExec("select count(*) from information_schema.partitions where table_schema='$conf{dbName}' and table_name='ts${gType}Players' and partition_name='p$period'","check partition existence on table ts${gType}Players for period $period");
+    $sth=$sldb->prepExec("select count(*) from information_schema.partitions where table_schema=DATABASE() and table_name='ts${gType}Players' and partition_name='p$period'","check partition existence on table ts${gType}Players for period $period");
     @countResult=$sth->fetchrow_array();
     error("Unable to query table information_schema.partitions for partition existence check") unless(@countResult);
     if($countResult[0] < 1) {
