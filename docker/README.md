@@ -27,7 +27,7 @@ To provision docker services for deployment:
 
 ### _(optional)_ Initialize the database
 
-If you are provisioning a new installation for SLDB:
+If you are provisioning a new installation of SLDB:
 
 - Create a file named `etc/initSldb.conf` with the following contents:
   ```
@@ -48,7 +48,7 @@ If you have a previous installation of SLDB you are migrating from:
 - Copy the generated dump to your new SLDB base directory
 - Run: `docker-compose up -d sldb-db `
 - Run: `gunzip -c <yourdumpfile> | docker-compose exec -T sldb-db /usr/bin/mysql -u root --password=<$MYSQL_ROOT_PASSWORD> <$MYSQL_DATABASE>`
-- Find and execute any other migration steps required between your old and new SLDB versions
+- Find and execute any migration steps required between your old and new SLDB versions
 
 ### Starting the services
 
@@ -67,19 +67,32 @@ Most of the variables are self explanatory, otherwise:
 
 - `MYSQL_*`: the variables that will be used to initialize the database instance, when provisioned from docker.
 - `UID|GID`: run `id` on your host machine to fetch and configure the values, this ensures permissions are available for the shared volumes: `log` and `etc`
-- `<COMPONENT>_CONF`: set of key-values to dynamically configure the component on initialization, these override defaults when configured
+- `<COMPONENT>_CONF`: set of key-values to dynamically configure the component upon initialization, these override defaults when configured
 - `docker-compose.yml`: service configuration, avoid touching whenever possible
 - `etc/{users,levels,commands}.conf`: general SLDB interface configuration
 - `etc/xmlRpc.users.conf`: configuration for users that have access to xmlRpc interface
 
 ### Operation
 
-If configured correctly, logs and configuration files should be available at
-`etc` and `log` on the host machine.
+Logs and configuration files are available at `etc` and `log` on the host
+machine.
 
-_(db provisioned with docker)_ Never stop the database service unless you don't
-need sldb running. All components depends on the database service and should
-start it automatically in case it's not running when they are started.
+Check all services are running as expected with `docker-compose ps`. Output
+should look like this:
+
+```
+       Name                      Command               State          Ports
+-------------------------------------------------------------------------------------
+sldb-db               /scripts/run.sh                  Up      3306/tcp
+sldb_ratingEngine_1   /opt/sldb-entrypoint.sh pe ...   Up
+sldb_slMonitor_1      /opt/sldb-entrypoint.sh pe ...   Up
+sldb_sldbLi_1         /opt/sldb-entrypoint.sh pe ...   Up
+sldb_xmlRpc_1         /opt/sldb-entrypoint.sh pe ...   Up      0.0.0.0:8300->8300/tcp
+```
+
+_(db provisioned with docker)_ Never stop the database service (sldb-db) unless
+you don't need sldb running. All components depend on the database service and
+should start it automatically in case it's not running when they are started.
 
 - To start a component: `docker-compose up -d <component>`
 - To stop a component: `docker-compose stop <component>`
@@ -87,9 +100,10 @@ start it automatically in case it's not running when they are started.
 Wait for the command to finish to ensure integrity of the database.
 
 In case hot-reloading is necessary, it's possible to edit the config files at
-`etc` in the host machine and send `SIGUSR2` to the concerned component.
+`etc` in the host machine and sending `SIGUSR2` to the sldbLi process.
 Alternatively, send `!reloadConf` to the SLDB bot user if your user has
-been configured to have access to it.
+been configured to have access to it. This only applies to sldbLi, all other
+components require restart.
 
 This is only encouraged for testing, quick fixes or uptime and won't be
 persisted if the service is restarted. Use the `.env` or `docker-compose.yml`
