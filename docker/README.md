@@ -69,6 +69,8 @@ Most of the variables are self explanatory, otherwise:
 - `UID|GID`: run `id` on your host machine to fetch and configure the values, this ensures permissions are available for the shared volumes: `log` and `etc`
 - `<COMPONENT>_CONF`: set of key-values to dynamically configure the component on initialization, these override defaults when configured
 - `docker-compose.yml`: service configuration, avoid touching whenever possible
+- `etc/{users,levels,commands}.conf`: general SLDB interface configuration
+- `etc/xmlRpc.users.conf`: configuration for users that have access to xmlRpc interface
 
 ### Operation
 
@@ -82,11 +84,13 @@ start it automatically in case it's not running when they are started.
 - To start a component: `docker-compose up -d <component>`
 - To stop a component: `docker-compose stop <component>`
 
-Wait for the command to finish to ensure integrity of the database, when
-stopping.
+Wait for the command to finish to ensure integrity of the database.
 
 In case hot-reloading is necessary, it's possible to edit the config files at
-`etc` in the host machine and send `SIGUSR2` to the concerned component. This
-is only encouraged for testing, quick fixes or uptime and won't be persisted if
-the service is restarted. Use the `.env` or `docker-compose.yml` file to persist
-configuration changes (requires restart).
+`etc` in the host machine and send `SIGUSR2` to the concerned component.
+Alternatively, send `!reloadConf` to the SLDB bot user if your user has
+been configured to have access to it.
+
+This is only encouraged for testing, quick fixes or uptime and won't be
+persisted if the service is restarted. Use the `.env` or `docker-compose.yml`
+file to persist configuration changes (requires restart).
