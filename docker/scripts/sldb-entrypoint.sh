@@ -25,9 +25,9 @@ done
 [[ -f /etc/sldb/sldb.conf ]] && cp /etc/sldb/sldb.conf etc/sldb.conf || touch etc/sldb.conf
 [[ -n $SLDB_CONF ]] && perl updateConfFile.pl etc/sldb.conf $SLDB_CONF
 
-[[ ! -z ${LEVELS_CONF+x} ]] && rm -f etc/levels.conf && printf "${LEVELS_CONF}" | sed -e 's/^\s\+//g' > etc/levels.conf
-[[ ! -z ${USERS_CONF+x} ]] && rm -f etc/users.conf && printf "${USERS_CONF}" | sed -e 's/^\s\+//g' > etc/users.conf
-[[ ! -z ${COMMANDS_CONF+x} ]] && rm -f etc/commands.conf && printf "${COMMANDS_CONF}" | sed -e 's/^\s\+//g' > etc/commands.conf
+[[ ! -f /etc/sldb/levels.conf ]] && cp /etc/sldb/levels.conf etc
+[[ ! -f /etc/sldb/users.conf ]] && cp /etc/sldb/users.conf etc
+[[ ! -f /etc/sldb/commands.conf ]] && cp /etc/sldb/commands.conf etc
 
 echo "Running $@ at $(printf '%s %s\n' "$(date)")" >> $logfile_var
 

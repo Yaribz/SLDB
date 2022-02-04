@@ -70,7 +70,6 @@ ADD https://raw.githubusercontent.com/Yaribz/SpringLobbyInterface/master/SpringL
 COPY *.pm *.pl ./
 COPY ./var ./var/
 COPY ./docker/scripts/*.sh /opt/
-COPY ./docker/scripts/initSldb.pl /sldb/
 COPY etc /etc/sldb/
 COPY docker/etc /etc/sldb/
 

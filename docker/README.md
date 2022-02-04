@@ -15,11 +15,15 @@ To provision docker services for deployment:
 - Copy the `.env` and `docker-compose.yml` files to the directory you want
   SLDB to live on your server
 - Edit the `.env` file to your requirements, see [Configuration](#configuration)
+- Run `mkdir etc log`
+- _(optional)_ Copy the users, levels and users configuration files and edit
+  them to your requirements:
+  `cd etc && curl -SLO "https://raw.githubusercontent.com/Yaribz/SLDB/master/etc/{commands,levels,users}.conf"`
+  If this step is not performed, the default files from SLDB will be used
 - _(optional)_ If your database server is not intended to be hosted with docker
   , remove any `depends_on` references to `sldb-db` on `docker-compose.yml` and
   edit the `SLDB_DB_DATABASE` environment variable accordingly.
 - Run `docker-compose pull`
-- Run `mkdir etc log`
 
 ### _(optional)_ Initialize the database
 
@@ -33,7 +37,8 @@ If you are provisioning a new installation for SLDB:
   ```
   If provisioning database with docker, replace the variables with the ones
   configured in `.env` as `MYSQL_*`
-- Run `docker-compose run xmlRpc perl initSldb.pl`
+- Run `docker-compose run xmlRpc perl sldbSetup.pl --init-db` and follow any
+  instructions required
 
 ### _(optional)_ Migrate the database
 
@@ -63,7 +68,7 @@ Most of the variables are self explanatory, otherwise:
 - `MYSQL_*`: the variables that will be used to initialize the database instance, when provisioned from docker.
 - `UID|GID`: run `id` on your host machine to fetch and configure the values, this ensures permissions are available for the shared volumes: `log` and `etc`
 - `<COMPONENT>_CONF`: set of key-values to dynamically configure the component on initialization, these override defaults when configured
-- `docker-compose.yml`: some files are configured directly in docker-compose.yml, such as levels.conf/commands.conf/users.conf
+- `docker-compose.yml`: service configuration, avoid touching whenever possible
 
 ### Operation
 
