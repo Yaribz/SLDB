@@ -1,0 +1,88 @@
+version: "3"
+services:
+  sldbLi:
+    command: perl sldbLi.pl etc/sldbLi.conf
+    image: badosu/sldb:latest
+    user: "${UID}:${GID}"
+    environment:
+      COMPONENT_NAME: sldbLi
+    depends_on:
+      - sldb-db
+      - slMonitor
+      - ratingEngine
+    env_file:
+      - .env
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
+
+  slMonitor:
+    command: perl slMonitor.pl
+    image: badosu/sldb:latest
+    user: "${UID}:${GID}"
+    environment:
+      COMPONENT_NAME: slMonitor
+    env_file:
+      - .env
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    depends_on:
+      - sldb-db
+    volumes:
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
+
+  ratingEngine:
+    command: perl ratingEngine.pl
+    image: badosu/sldb:latest
+    user: "${UID}:${GID}"
+    stdin_open: true # docker run -i
+    tty: true 
+    environment:
+      COMPONENT_NAME: ratingEngine
+    env_file:
+      - .env
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    depends_on:
+      - sldb-db
+    volumes:
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
+
+  xmlRpc:
+    command: perl xmlRpc.pl
+    image: badosu/sldb:latest
+    user: "${UID}:${GID}"
+    environment:
+      COMPONENT_NAME: xmlRpc
+    ports:
+      - 8300
+    env_file:
+      - .env
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    depends_on:
+      - sldb-db
+    volumes:
+      - ./log:/sldb/log
+      - ./etc:/sldb/etc
+
+  sldb-db:
+    image: yobasystems/alpine-mariadb:latest
+    container_name: sldb-db
+    env_file:
+      - .env
+    expose:
+      - "3306"
+    volumes:
+      - sldb-db:/var/lib/mysql
+    restart: always
+volumes:
+  sldb-db:
