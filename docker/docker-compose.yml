@@ -2,6 +2,7 @@ version: "3"
 services:
   sldbLi:
     command: perl sldbLi.pl etc/sldbLi.conf
+    restart: unless-stopped
     image: badosu/sldb:latest
     user: "${UID}:${GID}"
     environment:
@@ -21,6 +22,7 @@ services:
 
   slMonitor:
     command: perl slMonitor.pl
+    restart: unless-stopped
     image: badosu/sldb:latest
     user: "${UID}:${GID}"
     environment:
@@ -38,6 +40,7 @@ services:
 
   ratingEngine:
     command: perl ratingEngine.pl
+    restart: unless-stopped
     image: badosu/sldb:latest
     user: "${UID}:${GID}"
     stdin_open: true # docker run -i
@@ -57,6 +60,7 @@ services:
 
   xmlRpc:
     command: perl xmlRpc.pl
+    restart: unless-stopped
     image: badosu/sldb:latest
     user: "${UID}:${GID}"
     environment:
