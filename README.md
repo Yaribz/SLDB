@@ -56,6 +56,7 @@ The SLDB application depends on following projects:
 
 The SLDB backup script requires following dependencies, which are only needed if
 you plan to use this script for your backups:
+* "DBD::MariaDB" Perl module
 * GNU [tar](http://www.gnu.org/software/tar/) and
   [gzip](http://www.gnu.org/software/gzip/)
 * [LFTP](http://lftp.yar.ru/)
