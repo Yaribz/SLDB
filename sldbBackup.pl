@@ -8,7 +8,7 @@
 # be executed automatically through crontab for example, but it requires an
 # account with sufficient privileges to run mysqlhotcopy.
 #
-# Copyright (C) 2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2013-2025  Yann Riou <yaribzh@gmail.com>
 #
 # SLDB is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
 # along with SLDB.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-# Version 0.3 (2020/04/29)
+# Version 0.4 (2025/09/13)
 
 use strict;
 
@@ -65,7 +65,7 @@ my $tmpDir="$backupDir/backup_".(localtime->strftime('%Y%m%d_%H%M%S'));
 mkpath($tmpDir);
 
 print "Performing backup.\n" if($verbose);
-system("$mysqlhotcopyBin -q --noindices $sldbName $tmpDir");
+system("$mysqlhotcopyBin --host=127.0.0.1 --port=3306 -q --noindices $sldbName $tmpDir");
 
 print "Archiving backup.\n" if($verbose);
 system("tar c -C $tmpDir -f $tmpDir.tar $sldbName");
